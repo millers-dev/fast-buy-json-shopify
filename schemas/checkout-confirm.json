@@ -1,0 +1,112 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Checkout Confirm Request",
+    "description": "Confirms payment and creates the order",
+    "type": "object",
+    "required": [
+        "sessionToken",
+        "paymentDetails"
+    ],
+    "properties": {
+        "sessionToken": {
+            "type": "string",
+            "description": "Checkout session token",
+            "examples": [
+                "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+            ]
+        },
+        "paymentDetails": {
+            "type": "object",
+            "required": [
+                "method",
+                "transactionVerification"
+            ],
+            "properties": {
+                "method": {
+                    "type": "string",
+                    "description": "Payment method",
+                    "enum": [
+                        "credit_card",
+                        "debit_card",
+                        "paypal",
+                        "bank_transfer",
+                        "digital_wallet",
+                        "apple_pay",
+                        "google_pay"
+                    ],
+                    "examples": [
+                        "credit_card"
+                    ]
+                },
+                "transactionVerification": {
+                    "type": "object",
+                    "description": "Verification information to prevent fraudulent orders",
+                    "required": [
+                        "verificationMethod",
+                        "verificationToken"
+                    ],
+                    "properties": {
+                        "verificationMethod": {
+                            "type": "string",
+                            "description": "Method used to verify the transaction",
+                            "enum": [
+                                "captcha",
+                                "email_confirmation",
+                                "sms_confirmation",
+                                "payment_provider_token",
+                                "oauth_token"
+                            ],
+                            "examples": [
+                                "captcha"
+                            ]
+                        },
+                        "verificationToken": {
+                            "type": "string",
+                            "description": "Token proving the verification was completed",
+                            "examples": [
+                                "03AGdBq26EGx6NbXEWWVFUowyUEAGK..."
+                            ]
+                        },
+                        "verificationTimestamp": {
+                            "type": "string",
+                            "format": "date-time",
+                            "description": "When the verification was completed (ISO 8601 format)"
+                        }
+                    }
+                },
+                "cardDetails": {
+                    "type": "object",
+                    "description": "Credit card details (never stored)",
+                    "properties": {
+                        "lastFourDigits": {
+                            "type": "string",
+                            "description": "Last four digits of card number",
+                            "examples": [
+                                "4242"
+                            ]
+                        },
+                        "brand": {
+                            "type": "string",
+                            "description": "Card brand",
+                            "examples": [
+                                "Visa"
+                            ]
+                        }
+                    }
+                },
+                "externalPaymentId": {
+                    "type": "string",
+                    "description": "External payment processor ID",
+                    "examples": [
+                        "py_1JKWqZCZ6qsJgndJhNR3U5QD"
+                    ]
+                }
+            }
+        },
+        "extensions": {
+            "type": "object",
+            "description": "Additional custom fields",
+            "additionalProperties": true
+        }
+    }
+}

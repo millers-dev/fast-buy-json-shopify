@@ -1,0 +1,63 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Address",
+    "description": "Postal address for shipping or billing",
+    "type": "object",
+    "required": [
+        "line1",
+        "city",
+        "country",
+        "postalCode"
+    ],
+    "properties": {
+        "line1": {
+            "type": "string",
+            "description": "Address line 1",
+            "examples": [
+                "123 Main St"
+            ]
+        },
+        "line2": {
+            "type": "string",
+            "description": "Address line 2",
+            "examples": [
+                "Apt 4B"
+            ]
+        },
+        "city": {
+            "type": "string",
+            "description": "City",
+            "examples": [
+                "Berlin"
+            ]
+        },
+        "region": {
+            "type": "string",
+            "description": "State/Province/Region",
+            "examples": [
+                "Berlin"
+            ]
+        },
+        "state": {
+            "type": "string",
+            "description": "State or province (alias)",
+            "examples": [
+                "Berlin"
+            ]
+        },
+        "country": {
+            "type": "string",
+            "description": "Country code (ISO 3166-1 alpha-2)",
+            "examples": [
+                "DE"
+            ]
+        },
+        "postalCode": {
+            "type": "string",
+            "description": "Postal/ZIP code",
+            "examples": [
+                "10115"
+            ]
+        }
+    }
+}

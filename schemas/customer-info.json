@@ -1,0 +1,59 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Customer Info",
+    "description": "Customer contact information for checkout",
+    "type": "object",
+    "required": [
+        "email"
+    ],
+    "anyOf": [
+        {
+            "required": [
+                "phone"
+            ]
+        },
+        {
+            "required": [
+                "phoneNumber"
+            ]
+        }
+    ],
+    "properties": {
+        "email": {
+            "type": "string",
+            "format": "email",
+            "description": "Customer email address",
+            "examples": [
+                "customer@example.com"
+            ]
+        },
+        "phone": {
+            "type": "string",
+            "description": "Customer phone number",
+            "examples": [
+                "+49 30 12345678"
+            ]
+        },
+        "phoneNumber": {
+            "type": "string",
+            "description": "Alias accepted by demo servers",
+            "examples": [
+                "+49 30 12345678"
+            ]
+        },
+        "firstName": {
+            "type": "string",
+            "description": "Customer first name",
+            "examples": [
+                "Alex"
+            ]
+        },
+        "lastName": {
+            "type": "string",
+            "description": "Customer last name",
+            "examples": [
+                "Example"
+            ]
+        }
+    }
+}

@@ -1,0 +1,180 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Product Search Response",
+    "description": "Paginated product search results",
+    "type": "object",
+    "required": [
+        "results",
+        "pagination"
+    ],
+    "properties": {
+        "results": {
+            "type": "array",
+            "description": "Matching products",
+            "items": {
+                "type": "object",
+                "required": [
+                    "id",
+                    "name",
+                    "price"
+                ],
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "Unique product identifier",
+                        "examples": [
+                            "acme-wh-001"
+                        ]
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Product name",
+                        "examples": [
+                            "ACME Wireless Headphones Pro"
+                        ]
+                    },
+                    "brand": {
+                        "type": "string",
+                        "description": "Product brand",
+                        "examples": [
+                            "Acme"
+                        ]
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Product description",
+                        "examples": [
+                            "Premium wireless headphones with noise cancellation"
+                        ]
+                    },
+                    "price": {
+                        "type": "object",
+                        "required": [
+                            "amount",
+                            "currency"
+                        ],
+                        "properties": {
+                            "amount": {
+                                "type": "number",
+                                "description": "Price amount",
+                                "examples": [
+                                    199.99
+                                ]
+                            },
+                            "currency": {
+                                "type": "string",
+                                "description": "Currency code (ISO 4217)",
+                                "examples": [
+                                    "USD"
+                                ]
+                            }
+                        }
+                    },
+                    "availability": {
+                        "type": "object",
+                        "properties": {
+                            "status": {
+                                "type": "string",
+                                "enum": [
+                                    "in_stock",
+                                    "low_stock",
+                                    "out_of_stock",
+                                    "backorder",
+                                    "preorder"
+                                ],
+                                "examples": [
+                                    "in_stock"
+                                ]
+                            },
+                            "quantity": {
+                                "type": "integer",
+                                "examples": [
+                                    42
+                                ]
+                            }
+                        }
+                    },
+                    "categories": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "examples": [
+                            [
+                                "Electronics",
+                                "Audio",
+                                "Headphones"
+                            ]
+                        ]
+                    },
+                    "images": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "url": {
+                                    "type": "string",
+                                    "examples": [
+                                        "https://example.com/images/acme-wh-001-main.jpg"
+                                    ]
+                                },
+                                "alt": {
+                                    "type": "string",
+                                    "examples": [
+                                        "ACME Wireless Headphones Pro - Black"
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "variants": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "pagination": {
+            "type": "object",
+            "required": [
+                "currentPage",
+                "pageSize",
+                "totalItems",
+                "totalPages"
+            ],
+            "properties": {
+                "currentPage": {
+                    "type": "integer",
+                    "description": "Current page number",
+                    "examples": [
+                        1
+                    ]
+                },
+                "pageSize": {
+                    "type": "integer",
+                    "description": "Items per page",
+                    "examples": [
+                        10
+                    ]
+                },
+                "totalItems": {
+                    "type": "integer",
+                    "description": "Total matching items",
+                    "examples": [
+                        42
+                    ]
+                },
+                "totalPages": {
+                    "type": "integer",
+                    "description": "Total pages",
+                    "examples": [
+                        5
+                    ]
+                }
+            }
+        }
+    }
+}

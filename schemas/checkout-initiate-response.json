@@ -1,0 +1,190 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Checkout Initiate Response",
+    "description": "Checkout session tokens and optional cart snapshot",
+    "type": "object",
+    "required": [
+        "sessionToken",
+        "expiresAt",
+        "verificationToken"
+    ],
+    "properties": {
+        "sessionToken": {
+            "type": "string",
+            "description": "Checkout session token",
+            "examples": [
+                "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+            ]
+        },
+        "verificationToken": {
+            "type": "string",
+            "description": "Token that must be echoed in checkout confirm",
+            "examples": [
+                "vtok_8f3c2b1a0d9e8f7g6h5i4j3k2l1m0n9o"
+            ]
+        },
+        "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Session expiration time",
+            "examples": [
+                "2025-09-08T13:34:56.789Z"
+            ]
+        },
+        "cart": {
+            "type": "object",
+            "description": "Cart snapshot for the checkout session",
+            "required": [
+                "id",
+                "items"
+            ],
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "examples": [
+                        "c7f9b3e2"
+                    ]
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": [
+                            "productId",
+                            "quantity",
+                            "price"
+                        ],
+                        "properties": {
+                            "productId": {
+                                "type": "string",
+                                "examples": [
+                                    "acme-wh-001-black"
+                                ]
+                            },
+                            "name": {
+                                "type": "string",
+                                "examples": [
+                                    "ACME Wireless Headphones Pro"
+                                ]
+                            },
+                            "quantity": {
+                                "type": "integer",
+                                "examples": [
+                                    2
+                                ]
+                            },
+                            "options": {
+                                "type": "object",
+                                "additionalProperties": true
+                            },
+                            "price": {
+                                "type": "object",
+                                "required": [
+                                    "amount",
+                                    "currency"
+                                ],
+                                "properties": {
+                                    "amount": {
+                                        "type": "number",
+                                        "examples": [
+                                            199.99
+                                        ]
+                                    },
+                                    "currency": {
+                                        "type": "string",
+                                        "examples": [
+                                            "USD"
+                                        ]
+                                    }
+                                }
+                            },
+                            "lineTotal": {
+                                "type": "object",
+                                "required": [
+                                    "amount",
+                                    "currency"
+                                ],
+                                "properties": {
+                                    "amount": {
+                                        "type": "number",
+                                        "examples": [
+                                            399.98
+                                        ]
+                                    },
+                                    "currency": {
+                                        "type": "string",
+                                        "examples": [
+                                            "USD"
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "totals": {
+                    "type": "object",
+                    "properties": {
+                        "subtotal": {
+                            "type": "number",
+                            "examples": [
+                                399.98
+                            ]
+                        },
+                        "tax": {
+                            "type": "number",
+                            "examples": [
+                                39.99
+                            ]
+                        },
+                        "shipping": {
+                            "type": "number",
+                            "examples": [
+                                0
+                            ]
+                        },
+                        "total": {
+                            "type": "number",
+                            "examples": [
+                                439.97
+                            ]
+                        }
+                    }
+                },
+                "created": {
+                    "type": "string",
+                    "format": "date-time",
+                    "examples": [
+                        "2025-09-08T12:34:56.789Z"
+                    ]
+                },
+                "updated": {
+                    "type": "string",
+                    "format": "date-time",
+                    "examples": [
+                        "2025-09-08T12:45:22.123Z"
+                    ]
+                }
+            }
+        },
+        "riskAssessment": {
+            "type": "object",
+            "properties": {
+                "score": {
+                    "type": "integer",
+                    "description": "Risk score",
+                    "examples": [
+                        12
+                    ]
+                },
+                "verificationRequired": {
+                    "type": "boolean",
+                    "description": "Whether additional verification is required",
+                    "examples": [
+                        false
+                    ]
+                }
+            }
+        }
+    }
+}

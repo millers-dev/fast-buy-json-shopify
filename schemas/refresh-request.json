@@ -1,0 +1,18 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Refresh Request",
+    "description": "Refresh token used to obtain a new access token",
+    "type": "object",
+    "required": [
+        "refresh_token"
+    ],
+    "properties": {
+        "refresh_token": {
+            "type": "string",
+            "description": "Previously issued refresh token",
+            "examples": [
+                "dGhpcyBpcyBhIHJlZnJlc2ggdG9rZW4..."
+            ]
+        }
+    }
+}

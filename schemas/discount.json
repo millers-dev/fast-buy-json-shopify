@@ -1,0 +1,57 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Applied Discount",
+    "description": "Discount applied to the cart (non-stackable)",
+    "type": "object",
+    "required": [
+        "code",
+        "type",
+        "label",
+        "amount"
+    ],
+    "properties": {
+        "code": {
+            "type": "string",
+            "examples": [
+                "SAVE10"
+            ]
+        },
+        "type": {
+            "type": "string",
+            "enum": [
+                "percentage",
+                "fixed"
+            ],
+            "examples": [
+                "percentage"
+            ]
+        },
+        "label": {
+            "type": "string",
+            "examples": [
+                "10% off"
+            ]
+        },
+        "amount": {
+            "type": "object",
+            "required": [
+                "amount",
+                "currency"
+            ],
+            "properties": {
+                "amount": {
+                    "type": "number",
+                    "examples": [
+                        10
+                    ]
+                },
+                "currency": {
+                    "type": "string",
+                    "examples": [
+                        "USD"
+                    ]
+                }
+            }
+        }
+    }
+}

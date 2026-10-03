@@ -1,0 +1,88 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Shipping Option",
+    "description": "Selectable shipping method with price and delivery estimate",
+    "type": "object",
+    "required": [
+        "id",
+        "label",
+        "amount",
+        "estimatedDelivery"
+    ],
+    "properties": {
+        "id": {
+            "type": "string",
+            "examples": [
+                "standard"
+            ]
+        },
+        "label": {
+            "type": "string",
+            "examples": [
+                "Standard Shipping"
+            ]
+        },
+        "amount": {
+            "type": "object",
+            "required": [
+                "amount",
+                "currency"
+            ],
+            "properties": {
+                "amount": {
+                    "type": "number"
+                },
+                "currency": {
+                    "type": "string",
+                    "examples": [
+                        "USD"
+                    ]
+                }
+            }
+        },
+        "estimatedDelivery": {
+            "type": "object",
+            "required": [
+                "minDays",
+                "maxDays"
+            ],
+            "properties": {
+                "minDays": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "examples": [
+                        3
+                    ]
+                },
+                "maxDays": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "examples": [
+                        5
+                    ]
+                }
+            }
+        },
+        "freeOver": {
+            "type": "object",
+            "required": [
+                "amount",
+                "currency"
+            ],
+            "properties": {
+                "amount": {
+                    "type": "number"
+                },
+                "currency": {
+                    "type": "string"
+                }
+            }
+        },
+        "description": {
+            "type": "string",
+            "examples": [
+                "Delivered in 3–5 business days"
+            ]
+        }
+    }
+}

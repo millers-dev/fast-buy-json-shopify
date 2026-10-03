@@ -1,0 +1,18 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Cart Discount Request",
+    "description": "Apply or clear a promotional discount on the cart",
+    "type": "object",
+    "properties": {
+        "code": {
+            "type": [
+                "string",
+                "null"
+            ],
+            "description": "Promo code to apply; null or omitted clears the current discount",
+            "examples": [
+                "SAVE10"
+            ]
+        }
+    }
+}

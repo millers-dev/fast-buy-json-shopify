@@ -1,0 +1,235 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Cart",
+    "description": "Shopping cart with line items and totals",
+    "type": "object",
+    "required": [
+        "id",
+        "items"
+    ],
+    "properties": {
+        "id": {
+            "type": "string",
+            "description": "Cart identifier",
+            "examples": [
+                "c7f9b3e2"
+            ]
+        },
+        "items": {
+            "type": "array",
+            "description": "Cart items",
+            "items": {
+                "type": "object",
+                "required": [
+                    "productId",
+                    "quantity",
+                    "price"
+                ],
+                "properties": {
+                    "itemId": {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Stable line-item identifier"
+                    },
+                    "productId": {
+                        "type": "string",
+                        "description": "Product identifier",
+                        "examples": [
+                            "acme-wh-001-black"
+                        ]
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Product name",
+                        "examples": [
+                            "ACME Wireless Headphones Pro"
+                        ]
+                    },
+                    "quantity": {
+                        "type": "integer",
+                        "description": "Quantity",
+                        "examples": [
+                            2
+                        ]
+                    },
+                    "options": {
+                        "type": "object",
+                        "description": "Product options",
+                        "additionalProperties": true
+                    },
+                    "price": {
+                        "type": "object",
+                        "required": [
+                            "amount",
+                            "currency"
+                        ],
+                        "properties": {
+                            "amount": {
+                                "type": "number",
+                                "examples": [
+                                    199.99
+                                ]
+                            },
+                            "currency": {
+                                "type": "string",
+                                "examples": [
+                                    "USD"
+                                ]
+                            }
+                        }
+                    },
+                    "lineTotal": {
+                        "type": "object",
+                        "required": [
+                            "amount",
+                            "currency"
+                        ],
+                        "properties": {
+                            "amount": {
+                                "type": "number",
+                                "examples": [
+                                    399.98
+                                ]
+                            },
+                            "currency": {
+                                "type": "string",
+                                "examples": [
+                                    "USD"
+                                ]
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "shipping": {
+            "type": "object",
+            "description": "Selected shipping option and catalog snapshot",
+            "properties": {
+                "selectedOptionId": {
+                    "type": "string",
+                    "examples": [
+                        "standard"
+                    ]
+                },
+                "amount": {
+                    "type": "object",
+                    "required": [
+                        "amount",
+                        "currency"
+                    ],
+                    "properties": {
+                        "amount": {
+                            "type": "number"
+                        },
+                        "currency": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "options": {
+                    "type": "array",
+                    "items": {
+                        "type": "object"
+                    }
+                }
+            }
+        },
+        "appliedDiscounts": {
+            "type": "array",
+            "description": "Non-stackable discounts currently applied",
+            "items": {
+                "type": "object"
+            }
+        },
+        "totals": {
+            "type": "object",
+            "properties": {
+                "currency": {
+                    "type": "string",
+                    "examples": [
+                        "USD"
+                    ]
+                },
+                "subtotal": {
+                    "type": "number",
+                    "examples": [
+                        399.98
+                    ]
+                },
+                "discount": {
+                    "type": "number",
+                    "examples": [
+                        0
+                    ]
+                },
+                "taxableBase": {
+                    "type": "number",
+                    "examples": [
+                        399.98
+                    ]
+                },
+                "tax": {
+                    "type": "number",
+                    "examples": [
+                        39.99
+                    ]
+                },
+                "taxBreakdown": {
+                    "type": "object",
+                    "properties": {
+                        "rate": {
+                            "type": "number"
+                        },
+                        "taxableAmount": {
+                            "type": "number"
+                        },
+                        "amount": {
+                            "type": "number"
+                        },
+                        "label": {
+                            "type": "string"
+                        },
+                        "jurisdiction": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "shipping": {
+                    "type": "number",
+                    "examples": [
+                        0
+                    ]
+                },
+                "discountBreakdown": {
+                    "type": "array",
+                    "items": {
+                        "type": "object"
+                    }
+                },
+                "total": {
+                    "type": "number",
+                    "examples": [
+                        439.97
+                    ]
+                }
+            }
+        },
+        "created": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Cart creation timestamp",
+            "examples": [
+                "2025-09-08T12:34:56.789Z"
+            ]
+        },
+        "updated": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Cart last update timestamp",
+            "examples": [
+                "2025-09-08T12:45:22.123Z"
+            ]
+        }
+    }
+}

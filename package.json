@@ -1,0 +1,32 @@
+{
+  "name": "fast-buy-json-shopify",
+  "version": "0.1.0",
+  "private": true,
+  "description": "FastBuyJSON connector for one Shopify shop. Checkout stays on Shopify hosted checkout.",
+  "license": "MIT",
+  "author": "Tomasz Miller",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "main": "dist/src/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/src/index.js",
+    "test": "tsc && node --test dist/tests/*.test.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/millers-dev/Fast-Buy-JSON-Shopify.git"
+  },
+  "bugs": {
+    "url": "https://github.com/millers-dev/Fast-Buy-JSON-Shopify/issues"
+  },
+  "homepage": "https://github.com/millers-dev/Fast-Buy-JSON-Shopify#readme",
+  "devDependencies": {
+    "@types/node": "^20.17.30",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
+    "typescript": "^5.8.3"
+  }
+}

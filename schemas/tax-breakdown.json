@@ -1,0 +1,50 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Tax Breakdown",
+    "description": "Structured tax line applied to taxable merchandise base",
+    "type": "object",
+    "required": [
+        "rate",
+        "taxableAmount",
+        "amount",
+        "label",
+        "jurisdiction"
+    ],
+    "properties": {
+        "rate": {
+            "type": "number",
+            "description": "Tax rate as a decimal fraction",
+            "examples": [
+                0.1
+            ]
+        },
+        "taxableAmount": {
+            "type": "number",
+            "description": "Amount tax was calculated on (subtotal minus discount)",
+            "examples": [
+                99.99
+            ]
+        },
+        "amount": {
+            "type": "number",
+            "description": "Tax amount",
+            "examples": [
+                10
+            ]
+        },
+        "label": {
+            "type": "string",
+            "description": "Human-readable tax label",
+            "examples": [
+                "default"
+            ]
+        },
+        "jurisdiction": {
+            "type": "string",
+            "description": "Tax jurisdiction identifier (e.g. country code)",
+            "examples": [
+                "default"
+            ]
+        }
+    }
+}

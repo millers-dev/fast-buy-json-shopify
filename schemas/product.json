@@ -1,0 +1,189 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Product",
+    "description": "Canonical representation of a product",
+    "type": "object",
+    "required": [
+        "id",
+        "name",
+        "price"
+    ],
+    "properties": {
+        "id": {
+            "type": "string",
+            "description": "Unique product identifier",
+            "examples": [
+                "acme-wh-001"
+            ]
+        },
+        "name": {
+            "type": "string",
+            "description": "Product name",
+            "examples": [
+                "ACME Wireless Headphones Pro"
+            ]
+        },
+        "brand": {
+            "type": "string",
+            "description": "Product brand",
+            "examples": [
+                "Acme"
+            ]
+        },
+        "description": {
+            "type": "string",
+            "description": "Product description",
+            "examples": [
+                "Premium wireless headphones with noise cancellation"
+            ]
+        },
+        "price": {
+            "type": "object",
+            "required": [
+                "amount",
+                "currency"
+            ],
+            "properties": {
+                "amount": {
+                    "type": "number",
+                    "description": "Price amount",
+                    "examples": [
+                        199.99
+                    ]
+                },
+                "currency": {
+                    "type": "string",
+                    "description": "Currency code (ISO 4217)",
+                    "examples": [
+                        "USD"
+                    ]
+                }
+            }
+        },
+        "availability": {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "in_stock",
+                        "low_stock",
+                        "out_of_stock",
+                        "backorder",
+                        "preorder"
+                    ],
+                    "description": "Availability status",
+                    "examples": [
+                        "in_stock"
+                    ]
+                },
+                "quantity": {
+                    "type": "integer",
+                    "description": "Available quantity",
+                    "examples": [
+                        42
+                    ]
+                }
+            }
+        },
+        "categories": {
+            "type": "array",
+            "description": "Product categories",
+            "items": {
+                "type": "string"
+            },
+            "examples": [
+                [
+                    "Electronics",
+                    "Audio",
+                    "Headphones"
+                ]
+            ]
+        },
+        "images": {
+            "type": "array",
+            "description": "Product images",
+            "items": {
+                "type": "object",
+                "required": [
+                    "url"
+                ],
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "format": "uri",
+                        "description": "Image URL",
+                        "examples": [
+                            "https://example.com/images/acme-wh-001-main.jpg"
+                        ]
+                    },
+                    "alt": {
+                        "type": "string",
+                        "description": "Alternative text",
+                        "examples": [
+                            "ACME Wireless Headphones Pro - Black"
+                        ]
+                    }
+                }
+            }
+        },
+        "variants": {
+            "type": "array",
+            "description": "Product variants",
+            "items": {
+                "type": "object",
+                "required": [
+                    "id",
+                    "attributes"
+                ],
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "Variant identifier",
+                        "examples": [
+                            "acme-wh-001-black"
+                        ]
+                    },
+                    "attributes": {
+                        "type": "object",
+                        "description": "Variant attributes",
+                        "additionalProperties": true,
+                        "examples": [
+                            {
+                                "color": "black"
+                            }
+                        ]
+                    },
+                    "price": {
+                        "type": "object",
+                        "required": [
+                            "amount",
+                            "currency"
+                        ],
+                        "properties": {
+                            "amount": {
+                                "type": "number",
+                                "description": "Price amount",
+                                "examples": [
+                                    199.99
+                                ]
+                            },
+                            "currency": {
+                                "type": "string",
+                                "description": "Currency code (ISO 4217)",
+                                "examples": [
+                                    "USD"
+                                ]
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "extensions": {
+            "type": "object",
+            "description": "Additional custom fields",
+            "additionalProperties": true
+        }
+    }
+}

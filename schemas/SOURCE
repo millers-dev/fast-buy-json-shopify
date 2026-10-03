@@ -1,0 +1,5 @@
+Vendored from https://github.com/millers-dev/fast-buy-json tag 1.0.0
+commit 396846ef0cfc18fe8a12dc2e8a99245531fcda97
+
+The JSON files in this directory are an unmodified copy of schemas/ at that tag.
+Do not edit them here. A contract change lands in millers-dev/fast-buy-json first.
