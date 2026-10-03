@@ -1,0 +1,18 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Certificate Request",
+    "description": "Client certificate in PEM format for certificate authentication",
+    "type": "object",
+    "required": [
+        "certificate"
+    ],
+    "properties": {
+        "certificate": {
+            "type": "string",
+            "description": "X.509 client certificate in PEM encoding",
+            "examples": [
+                "-----BEGIN CERTIFICATE-----\nMIIC...\n-----END CERTIFICATE-----"
+            ]
+        }
+    }
+}

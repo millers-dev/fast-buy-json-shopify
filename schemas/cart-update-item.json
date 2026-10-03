@@ -1,0 +1,19 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "CartUpdateItemRequest",
+    "description": "Update a cart line item quantity (absolute, minimum 1)",
+    "type": "object",
+    "required": [
+        "quantity"
+    ],
+    "properties": {
+        "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "New absolute quantity for the line item",
+            "examples": [
+                2
+            ]
+        }
+    }
+}

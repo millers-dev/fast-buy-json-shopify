@@ -1,0 +1,26 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Money",
+    "description": "Monetary amount with ISO 4217 currency code",
+    "type": "object",
+    "required": [
+        "amount",
+        "currency"
+    ],
+    "properties": {
+        "amount": {
+            "type": "number",
+            "description": "Price amount",
+            "examples": [
+                199.99
+            ]
+        },
+        "currency": {
+            "type": "string",
+            "description": "Currency code (ISO 4217)",
+            "examples": [
+                "USD"
+            ]
+        }
+    }
+}

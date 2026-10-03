@@ -1,0 +1,42 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Token Response",
+    "description": "OAuth2-style access and refresh tokens",
+    "type": "object",
+    "required": [
+        "access_token",
+        "token_type",
+        "expires_in"
+    ],
+    "properties": {
+        "access_token": {
+            "type": "string",
+            "description": "JWT access token",
+            "examples": [
+                "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+            ]
+        },
+        "refresh_token": {
+            "type": "string",
+            "description": "Refresh token for obtaining new access tokens",
+            "examples": [
+                "dGhpcyBpcyBhIHJlZnJlc2ggdG9rZW4..."
+            ]
+        },
+        "token_type": {
+            "type": "string",
+            "description": "Token type",
+            "default": "bearer",
+            "examples": [
+                "bearer"
+            ]
+        },
+        "expires_in": {
+            "type": "integer",
+            "description": "Access token lifetime in seconds",
+            "examples": [
+                3600
+            ]
+        }
+    }
+}

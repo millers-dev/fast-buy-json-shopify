@@ -1,0 +1,175 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Detect Response",
+    "description": "FastBuyJSON capability discovery metadata for agents",
+    "type": "object",
+    "required": [
+        "standard",
+        "specVersion",
+        "implementationVersion",
+        "supportedFeatures",
+        "capabilities",
+        "endpoints"
+    ],
+    "properties": {
+        "standard": {
+            "type": "string",
+            "description": "Standard identifier",
+            "examples": [
+                "FastBuyJSON"
+            ]
+        },
+        "specVersion": {
+            "type": "string",
+            "description": "FastBuyJSON specification version",
+            "examples": [
+                "1.0.0"
+            ]
+        },
+        "implementationVersion": {
+            "type": "string",
+            "description": "Server implementation version",
+            "examples": [
+                "1.0.0"
+            ]
+        },
+        "capabilities": {
+            "type": "object",
+            "description": "Structured commerce capability descriptor",
+            "additionalProperties": true,
+            "examples": [
+                {
+                    "filters": {
+                        "fields": [
+                            "brand",
+                            "categories",
+                            "priceRange",
+                            "availability",
+                            "extensions"
+                        ],
+                        "additionalProperties": true
+                    },
+                    "shipping": {
+                        "options": [
+                            "standard",
+                            "express"
+                        ],
+                        "freeShippingThreshold": {
+                            "amount": 100,
+                            "currency": "USD"
+                        }
+                    },
+                    "tax": {
+                        "mode": "jurisdiction",
+                        "defaultRate": 0.1
+                    },
+                    "discounts": {
+                        "types": [
+                            "percentage",
+                            "fixed"
+                        ],
+                        "stackable": false
+                    },
+                    "extensions": {
+                        "supported": true,
+                        "echo": true,
+                        "reservedNamespaces": [
+                            "fastbuyjson",
+                            "x-fastbuyjson"
+                        ],
+                        "vendorKeyConvention": "reverse-dns or x- prefix"
+                    }
+                }
+            ]
+        },
+        "supportedFeatures": {
+            "type": "array",
+            "description": "Supported FastBuyJSON features",
+            "items": {
+                "type": "string"
+            },
+            "examples": [
+                [
+                    "idempotency",
+                    "pagination",
+                    "schema_validation",
+                    "authentication",
+                    "anonymous_cart",
+                    "guest_checkout"
+                ]
+            ]
+        },
+        "endpoints": {
+            "type": "array",
+            "description": "Supported API endpoint groups",
+            "items": {
+                "type": "string"
+            },
+            "examples": [
+                [
+                    "products",
+                    "cart",
+                    "checkout",
+                    "orders",
+                    "auth"
+                ]
+            ]
+        },
+        "authentication": {
+            "type": "object",
+            "description": "Authentication capabilities",
+            "additionalProperties": true,
+            "examples": [
+                {
+                    "methods": [
+                        "jwt",
+                        "certificate",
+                        "anonymous"
+                    ],
+                    "endpoints": [
+                        "/auth/login",
+                        "/auth/refresh",
+                        "/auth/certificate"
+                    ]
+                }
+            ]
+        },
+        "checkout": {
+            "type": "object",
+            "description": "Checkout capabilities",
+            "additionalProperties": true,
+            "examples": [
+                {
+                    "methods": [
+                        "registered_user",
+                        "guest_checkout"
+                    ],
+                    "verification": [
+                        "email",
+                        "phone",
+                        "credit_card"
+                    ]
+                }
+            ]
+        },
+        "merchantInfo": {
+            "type": "object",
+            "description": "Merchant metadata",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "examples": [
+                        "FastBuyJSON Demo Store"
+                    ]
+                },
+                "url": {
+                    "type": "string",
+                    "format": "uri",
+                    "examples": [
+                        "https://example.com"
+                    ]
+                }
+            }
+        }
+    }
+}

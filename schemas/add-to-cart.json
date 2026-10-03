@@ -1,0 +1,43 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Add to Cart Request",
+    "description": "Payload for adding an item to the cart",
+    "type": "object",
+    "required": [
+        "productId"
+    ],
+    "properties": {
+        "productId": {
+            "type": "string",
+            "description": "Product identifier",
+            "examples": [
+                "acme-wh-001"
+            ]
+        },
+        "quantity": {
+            "type": "integer",
+            "description": "Quantity to add",
+            "minimum": 1,
+            "default": 1,
+            "examples": [
+                2
+            ]
+        },
+        "options": {
+            "type": "object",
+            "description": "Product options (e.g., color, size)",
+            "additionalProperties": true,
+            "examples": [
+                {
+                    "color": "black"
+                }
+            ]
+        },
+        "extensions": {
+            "type": "object",
+            "description": "Additional custom fields",
+            "additionalProperties": true
+        }
+    },
+    "additionalProperties": true
+}

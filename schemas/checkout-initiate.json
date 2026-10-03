@@ -1,0 +1,198 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Checkout Initiate Request",
+    "description": "Starts a checkout session with addresses and cart reference",
+    "type": "object",
+    "required": [
+        "cartId",
+        "shippingAddress",
+        "customerInfo"
+    ],
+    "properties": {
+        "cartId": {
+            "type": "string",
+            "description": "Cart identifier",
+            "examples": [
+                "c7f9b3e2"
+            ]
+        },
+        "customerInfo": {
+            "type": "object",
+            "description": "Customer contact information for order confirmation and communication",
+            "required": [
+                "email"
+            ],
+            "anyOf": [
+                {
+                    "required": [
+                        "phone"
+                    ]
+                },
+                {
+                    "required": [
+                        "phoneNumber"
+                    ]
+                }
+            ],
+            "properties": {
+                "email": {
+                    "type": "string",
+                    "format": "email",
+                    "description": "Customer email address for order confirmation and communication",
+                    "examples": [
+                        "customer@example.com"
+                    ]
+                },
+                "phone": {
+                    "type": "string",
+                    "description": "Customer phone number for shipping updates and verification",
+                    "pattern": "^\\+?[0-9\\s\\-\\(\\)]{8,20}$",
+                    "examples": [
+                        "+49 30 12345678"
+                    ]
+                },
+                "phoneNumber": {
+                    "type": "string",
+                    "description": "Legacy alias for phone",
+                    "pattern": "^\\+?[0-9\\s\\-\\(\\)]{8,20}$",
+                    "examples": [
+                        "+49 30 12345678"
+                    ]
+                },
+                "firstName": {
+                    "type": "string",
+                    "description": "Customer first name"
+                },
+                "lastName": {
+                    "type": "string",
+                    "description": "Customer last name"
+                }
+            }
+        },
+        "shippingAddress": {
+            "type": "object",
+            "required": [
+                "line1",
+                "city",
+                "country",
+                "postalCode"
+            ],
+            "properties": {
+                "line1": {
+                    "type": "string",
+                    "description": "Address line 1",
+                    "examples": [
+                        "123 Main St"
+                    ]
+                },
+                "line2": {
+                    "type": "string",
+                    "description": "Address line 2",
+                    "examples": [
+                        "Apt 4B"
+                    ]
+                },
+                "city": {
+                    "type": "string",
+                    "description": "City",
+                    "examples": [
+                        "Berlin"
+                    ]
+                },
+                "region": {
+                    "type": "string",
+                    "description": "State/Province/Region",
+                    "examples": [
+                        "Berlin"
+                    ]
+                },
+                "country": {
+                    "type": "string",
+                    "description": "Country code (ISO 3166-1 alpha-2)",
+                    "examples": [
+                        "DE"
+                    ]
+                },
+                "postalCode": {
+                    "type": "string",
+                    "description": "Postal/ZIP code",
+                    "examples": [
+                        "10115"
+                    ]
+                }
+            }
+        },
+        "billingAddress": {
+            "type": "object",
+            "required": [
+                "line1",
+                "city",
+                "country",
+                "postalCode"
+            ],
+            "properties": {
+                "line1": {
+                    "type": "string",
+                    "description": "Address line 1",
+                    "examples": [
+                        "123 Main St"
+                    ]
+                },
+                "line2": {
+                    "type": "string",
+                    "description": "Address line 2",
+                    "examples": [
+                        "Apt 4B"
+                    ]
+                },
+                "city": {
+                    "type": "string",
+                    "description": "City",
+                    "examples": [
+                        "Berlin"
+                    ]
+                },
+                "region": {
+                    "type": "string",
+                    "description": "State/Province/Region",
+                    "examples": [
+                        "Berlin"
+                    ]
+                },
+                "country": {
+                    "type": "string",
+                    "description": "Country code (ISO 3166-1 alpha-2)",
+                    "examples": [
+                        "DE"
+                    ]
+                },
+                "postalCode": {
+                    "type": "string",
+                    "description": "Postal/ZIP code",
+                    "examples": [
+                        "10115"
+                    ]
+                }
+            }
+        },
+        "shippingOptionId": {
+            "type": "string",
+            "description": "Shipping option to use for this checkout (defaults to cart selection or standard)",
+            "examples": [
+                "express"
+            ]
+        },
+        "discountCode": {
+            "type": "string",
+            "description": "Optional promo code to apply before totals are finalized",
+            "examples": [
+                "SAVE10"
+            ]
+        },
+        "extensions": {
+            "type": "object",
+            "description": "Additional custom fields",
+            "additionalProperties": true
+        }
+    }
+}

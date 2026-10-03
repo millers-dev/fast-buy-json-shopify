@@ -1,0 +1,98 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Cart Item",
+    "description": "Line item in a shopping cart",
+    "type": "object",
+    "required": [
+        "productId",
+        "quantity",
+        "price"
+    ],
+    "properties": {
+        "itemId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable line-item identifier assigned when the item is added",
+            "examples": [
+                "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+            ]
+        },
+        "productId": {
+            "type": "string",
+            "description": "Product identifier",
+            "examples": [
+                "acme-wh-001-black"
+            ]
+        },
+        "name": {
+            "type": "string",
+            "description": "Product name",
+            "examples": [
+                "ACME Wireless Headphones Pro"
+            ]
+        },
+        "quantity": {
+            "type": "integer",
+            "description": "Quantity",
+            "examples": [
+                2
+            ]
+        },
+        "options": {
+            "type": "object",
+            "description": "Product options",
+            "additionalProperties": true,
+            "examples": [
+                {
+                    "color": "black"
+                }
+            ]
+        },
+        "price": {
+            "type": "object",
+            "required": [
+                "amount",
+                "currency"
+            ],
+            "properties": {
+                "amount": {
+                    "type": "number",
+                    "description": "Unit price",
+                    "examples": [
+                        199.99
+                    ]
+                },
+                "currency": {
+                    "type": "string",
+                    "description": "Currency code (ISO 4217)",
+                    "examples": [
+                        "USD"
+                    ]
+                }
+            }
+        },
+        "lineTotal": {
+            "type": "object",
+            "required": [
+                "amount",
+                "currency"
+            ],
+            "properties": {
+                "amount": {
+                    "type": "number",
+                    "description": "Line total",
+                    "examples": [
+                        399.98
+                    ]
+                },
+                "currency": {
+                    "type": "string",
+                    "description": "Currency code (ISO 4217)",
+                    "examples": [
+                        "USD"
+                    ]
+                }
+            }
+        }
+    }
+}

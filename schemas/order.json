@@ -1,0 +1,133 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Order",
+    "description": "Confirmed order snapshot",
+    "type": "object",
+    "required": [
+        "id",
+        "status"
+    ],
+    "properties": {
+        "id": {
+            "type": "string",
+            "description": "Order identifier",
+            "examples": [
+                "ord-2025-09-08-123456"
+            ]
+        },
+        "status": {
+            "type": "string",
+            "description": "Order status",
+            "enum": [
+                "confirmed",
+                "processing",
+                "shipped",
+                "delivered",
+                "cancelled",
+                "refunded"
+            ],
+            "examples": [
+                "confirmed"
+            ]
+        },
+        "items": {
+            "type": "array",
+            "description": "Order line items",
+            "items": {
+                "type": "object",
+                "required": [
+                    "productId",
+                    "quantity",
+                    "price"
+                ],
+                "properties": {
+                    "productId": {
+                        "type": "string",
+                        "examples": [
+                            "acme-wh-001-black"
+                        ]
+                    },
+                    "name": {
+                        "type": "string",
+                        "examples": [
+                            "ACME Wireless Headphones Pro"
+                        ]
+                    },
+                    "quantity": {
+                        "type": "integer",
+                        "examples": [
+                            2
+                        ]
+                    },
+                    "options": {
+                        "type": "object",
+                        "additionalProperties": true
+                    },
+                    "price": {
+                        "type": "object",
+                        "required": [
+                            "amount",
+                            "currency"
+                        ],
+                        "properties": {
+                            "amount": {
+                                "type": "number",
+                                "examples": [
+                                    199.99
+                                ]
+                            },
+                            "currency": {
+                                "type": "string",
+                                "examples": [
+                                    "USD"
+                                ]
+                            }
+                        }
+                    },
+                    "lineTotal": {
+                        "type": "object",
+                        "required": [
+                            "amount",
+                            "currency"
+                        ],
+                        "properties": {
+                            "amount": {
+                                "type": "number",
+                                "examples": [
+                                    399.98
+                                ]
+                            },
+                            "currency": {
+                                "type": "string",
+                                "examples": [
+                                    "USD"
+                                ]
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "totals": {
+            "type": "object",
+            "description": "Order totals",
+            "additionalProperties": true,
+            "examples": [
+                {
+                    "subtotal": 399.98,
+                    "tax": 39.99,
+                    "shipping": 0,
+                    "total": 439.97
+                }
+            ]
+        },
+        "created": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Order creation timestamp",
+            "examples": [
+                "2025-09-08T12:34:56.789Z"
+            ]
+        }
+    }
+}

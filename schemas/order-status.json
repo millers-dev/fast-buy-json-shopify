@@ -1,0 +1,400 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Order Status Response",
+    "description": "Returns order state and tracking information",
+    "type": "object",
+    "required": [
+        "order"
+    ],
+    "properties": {
+        "order": {
+            "type": "object",
+            "required": [
+                "id",
+                "status",
+                "items",
+                "totals",
+                "created"
+            ],
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "description": "Order identifier",
+                    "examples": [
+                        "ord-2025-09-08-123456"
+                    ]
+                },
+                "status": {
+                    "type": "string",
+                    "description": "Order status",
+                    "enum": [
+                        "confirmed",
+                        "processing",
+                        "shipped",
+                        "delivered",
+                        "cancelled",
+                        "refunded"
+                    ],
+                    "examples": [
+                        "confirmed"
+                    ]
+                },
+                "items": {
+                    "type": "array",
+                    "description": "Order items",
+                    "items": {
+                        "type": "object",
+                        "required": [
+                            "productId",
+                            "quantity",
+                            "price",
+                            "lineTotal"
+                        ],
+                        "properties": {
+                            "productId": {
+                                "type": "string",
+                                "description": "Product identifier",
+                                "examples": [
+                                    "acme-wh-001-black"
+                                ]
+                            },
+                            "name": {
+                                "type": "string",
+                                "description": "Product name",
+                                "examples": [
+                                    "ACME Wireless Headphones Pro"
+                                ]
+                            },
+                            "quantity": {
+                                "type": "integer",
+                                "description": "Quantity",
+                                "examples": [
+                                    2
+                                ]
+                            },
+                            "options": {
+                                "type": "object",
+                                "description": "Product options",
+                                "additionalProperties": true,
+                                "examples": [
+                                    {
+                                        "color": "black"
+                                    }
+                                ]
+                            },
+                            "price": {
+                                "type": "object",
+                                "required": [
+                                    "amount",
+                                    "currency"
+                                ],
+                                "properties": {
+                                    "amount": {
+                                        "type": "number",
+                                        "description": "Unit price",
+                                        "examples": [
+                                            199.99
+                                        ]
+                                    },
+                                    "currency": {
+                                        "type": "string",
+                                        "description": "Currency code",
+                                        "examples": [
+                                            "USD"
+                                        ]
+                                    }
+                                }
+                            },
+                            "lineTotal": {
+                                "type": "object",
+                                "required": [
+                                    "amount",
+                                    "currency"
+                                ],
+                                "properties": {
+                                    "amount": {
+                                        "type": "number",
+                                        "description": "Line total",
+                                        "examples": [
+                                            399.98
+                                        ]
+                                    },
+                                    "currency": {
+                                        "type": "string",
+                                        "description": "Currency code",
+                                        "examples": [
+                                            "USD"
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "totals": {
+                    "type": "object",
+                    "required": [
+                        "subtotal",
+                        "total"
+                    ],
+                    "properties": {
+                        "subtotal": {
+                            "type": "number",
+                            "description": "Order subtotal",
+                            "examples": [
+                                399.98
+                            ]
+                        },
+                        "tax": {
+                            "type": "number",
+                            "description": "Tax amount",
+                            "examples": [
+                                39.99
+                            ]
+                        },
+                        "shipping": {
+                            "type": "number",
+                            "description": "Shipping cost",
+                            "examples": [
+                                0
+                            ]
+                        },
+                        "discount": {
+                            "type": "number",
+                            "description": "Discount amount",
+                            "examples": [
+                                0
+                            ]
+                        },
+                        "total": {
+                            "type": "number",
+                            "description": "Order total",
+                            "examples": [
+                                439.97
+                            ]
+                        }
+                    }
+                },
+                "shippingAddress": {
+                    "type": "object",
+                    "required": [
+                        "line1",
+                        "city",
+                        "country",
+                        "postalCode"
+                    ],
+                    "properties": {
+                        "line1": {
+                            "type": "string",
+                            "description": "Address line 1",
+                            "examples": [
+                                "123 Main St"
+                            ]
+                        },
+                        "line2": {
+                            "type": "string",
+                            "description": "Address line 2",
+                            "examples": [
+                                "Apt 4B"
+                            ]
+                        },
+                        "city": {
+                            "type": "string",
+                            "description": "City",
+                            "examples": [
+                                "Berlin"
+                            ]
+                        },
+                        "region": {
+                            "type": "string",
+                            "description": "State/Province/Region",
+                            "examples": [
+                                "Berlin"
+                            ]
+                        },
+                        "country": {
+                            "type": "string",
+                            "description": "Country code (ISO 3166-1 alpha-2)",
+                            "examples": [
+                                "DE"
+                            ]
+                        },
+                        "postalCode": {
+                            "type": "string",
+                            "description": "Postal/ZIP code",
+                            "examples": [
+                                "10115"
+                            ]
+                        }
+                    }
+                },
+                "billingAddress": {
+                    "type": "object",
+                    "required": [
+                        "line1",
+                        "city",
+                        "country",
+                        "postalCode"
+                    ],
+                    "properties": {
+                        "line1": {
+                            "type": "string",
+                            "description": "Address line 1",
+                            "examples": [
+                                "123 Main St"
+                            ]
+                        },
+                        "line2": {
+                            "type": "string",
+                            "description": "Address line 2",
+                            "examples": [
+                                "Apt 4B"
+                            ]
+                        },
+                        "city": {
+                            "type": "string",
+                            "description": "City",
+                            "examples": [
+                                "Berlin"
+                            ]
+                        },
+                        "region": {
+                            "type": "string",
+                            "description": "State/Province/Region",
+                            "examples": [
+                                "Berlin"
+                            ]
+                        },
+                        "country": {
+                            "type": "string",
+                            "description": "Country code (ISO 3166-1 alpha-2)",
+                            "examples": [
+                                "DE"
+                            ]
+                        },
+                        "postalCode": {
+                            "type": "string",
+                            "description": "Postal/ZIP code",
+                            "examples": [
+                                "10115"
+                            ]
+                        }
+                    }
+                },
+                "payment": {
+                    "type": "object",
+                    "required": [
+                        "method",
+                        "status"
+                    ],
+                    "properties": {
+                        "method": {
+                            "type": "string",
+                            "description": "Payment method",
+                            "examples": [
+                                "credit_card"
+                            ]
+                        },
+                        "status": {
+                            "type": "string",
+                            "description": "Payment status",
+                            "enum": [
+                                "pending",
+                                "approved",
+                                "declined",
+                                "refunded"
+                            ],
+                            "examples": [
+                                "approved"
+                            ]
+                        },
+                        "lastFourDigits": {
+                            "type": "string",
+                            "description": "Last four digits of card number",
+                            "examples": [
+                                "4242"
+                            ]
+                        },
+                        "brand": {
+                            "type": "string",
+                            "description": "Card brand",
+                            "examples": [
+                                "Visa"
+                            ]
+                        },
+                        "externalPaymentId": {
+                            "type": "string",
+                            "description": "External payment processor ID",
+                            "examples": [
+                                "py_1JKWqZCZ6qsJgndJhNR3U5QD"
+                            ]
+                        }
+                    }
+                },
+                "shipment": {
+                    "type": "object",
+                    "properties": {
+                        "carrier": {
+                            "type": "string",
+                            "description": "Shipping carrier",
+                            "examples": [
+                                "DHL"
+                            ]
+                        },
+                        "trackingNumber": {
+                            "type": "string",
+                            "description": "Tracking number",
+                            "examples": [
+                                "1Z999AA10123456784"
+                            ]
+                        },
+                        "estimatedDelivery": {
+                            "type": "string",
+                            "format": "date",
+                            "description": "Estimated delivery date",
+                            "examples": [
+                                "2025-09-10"
+                            ]
+                        },
+                        "trackingUrl": {
+                            "type": "string",
+                            "format": "uri",
+                            "description": "Tracking URL",
+                            "examples": [
+                                "https://www.dhl.com/tracking/1Z999AA10123456784"
+                            ]
+                        }
+                    }
+                },
+                "created": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "Order creation timestamp",
+                    "examples": [
+                        "2025-09-08T12:34:56.789Z"
+                    ]
+                },
+                "updated": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "Order last update timestamp",
+                    "examples": [
+                        "2025-09-08T12:45:22.123Z"
+                    ]
+                }
+            }
+        },
+        "message": {
+            "type": "string",
+            "description": "Optional message",
+            "examples": [
+                "Order confirmed successfully"
+            ]
+        },
+        "extensions": {
+            "type": "object",
+            "description": "Additional custom fields",
+            "additionalProperties": true
+        }
+    }
+}
