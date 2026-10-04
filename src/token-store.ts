@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 import initSqlJs, { type Database, type SqlValue } from "sql.js";
 
+import { isRecord } from "./json.js";
 import { decryptSecret, encryptSecret } from "./secret-box.js";
 
 export const TOKEN_DATABASE_FILENAME = "fastbuyjson-shopify.sqlite";
@@ -50,6 +51,37 @@ export class TokenDecryptError extends Error {
   }
 }
 
+const CART_SCHEMA = `
+CREATE TABLE IF NOT EXISTS anonymous_cart (
+  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+  shop_domain TEXT NOT NULL,
+  cart_id TEXT NOT NULL,
+  shopify_nonce BLOB NOT NULL,
+  shopify_ciphertext BLOB NOT NULL,
+  extensions_json TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+)`;
+
+const LINE_SCHEMA = `
+CREATE TABLE IF NOT EXISTS cart_line (
+  item_id TEXT PRIMARY KEY,
+  position INTEGER NOT NULL,
+  line_nonce BLOB NOT NULL,
+  line_ciphertext BLOB NOT NULL
+)`;
+
+const IDEMPOTENCY_SCHEMA = `
+CREATE TABLE IF NOT EXISTS idempotency_record (
+  scope TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
+  fingerprint TEXT NOT NULL,
+  status INTEGER NOT NULL,
+  body_json TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  PRIMARY KEY (scope, idempotency_key)
+)`;
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS shop_credential (
   singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -91,6 +123,9 @@ export class TokenStore {
       ? new SQL.Database(new Uint8Array(readFileSync(filePath)))
       : new SQL.Database();
     db.run(SCHEMA);
+    db.run(CART_SCHEMA);
+    db.run(LINE_SCHEMA);
+    db.run(IDEMPOTENCY_SCHEMA);
     return new TokenStore(db, filePath, key);
   }
 
@@ -203,7 +238,17 @@ export class TokenStore {
   deleteShop(shopDomain: string): boolean {
     this.db.run("DELETE FROM shop_credential WHERE singleton = 1 AND shop_domain = ?", [shopDomain]);
     const deleted = this.db.getRowsModified() === 1;
+    this.db.run("DELETE FROM anonymous_cart WHERE singleton = 1 AND shop_domain = ?", [shopDomain]);
+    const cartDeleted = this.db.getRowsModified() > 0;
+    if (cartDeleted) {
+      this.db.run("DELETE FROM cart_line");
+    }
+    let idempotencyDeleted = false;
     if (deleted) {
+      this.db.run("DELETE FROM idempotency_record");
+      idempotencyDeleted = this.db.getRowsModified() > 0;
+    }
+    if (deleted || cartDeleted || idempotencyDeleted) {
       this.persist();
     }
     return deleted;
@@ -261,6 +306,177 @@ export class TokenStore {
     this.persist();
   }
 
+  getAnonymousCart(shopDomain: string): StoredCart | null {
+    const row = this.one(
+      `SELECT shop_domain, cart_id, shopify_nonce, shopify_ciphertext, extensions_json, created_at, updated_at
+       FROM anonymous_cart WHERE singleton = 1`,
+    );
+    if (row === undefined) {
+      return null;
+    }
+    const domain = readString(row, "shop_domain");
+    const cartId = readString(row, "cart_id");
+    if (domain === null || cartId === null) {
+      throw new TokenDecryptError();
+    }
+    if (domain !== shopDomain) {
+      return null;
+    }
+    const shopifyCartId = this.readSecret(row, "shopify", cartAad(shopDomain));
+    if (shopifyCartId === null) {
+      throw new TokenDecryptError();
+    }
+    const createdAt = readNullableInt(row, "created_at");
+    const updatedAt = readNullableInt(row, "updated_at");
+    if (createdAt === null || updatedAt === null) {
+      throw new TokenDecryptError();
+    }
+    return {
+      cartId,
+      shopifyCartId,
+      extensions: readExtensions(row.extensions_json),
+      createdAt,
+      updatedAt,
+      lines: this.cartLines(shopDomain),
+    };
+  }
+
+  saveAnonymousCart(shopDomain: string, cart: StoredCart): void {
+    const shopify = encryptSecret(this.key, cart.shopifyCartId, cartAad(shopDomain));
+    this.db.run(
+      `INSERT INTO anonymous_cart (
+         singleton, shop_domain, cart_id, shopify_nonce, shopify_ciphertext, extensions_json, created_at, updated_at
+       ) VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(singleton) DO UPDATE SET
+         shop_domain = excluded.shop_domain,
+         cart_id = excluded.cart_id,
+         shopify_nonce = excluded.shopify_nonce,
+         shopify_ciphertext = excluded.shopify_ciphertext,
+         extensions_json = excluded.extensions_json,
+         created_at = excluded.created_at,
+         updated_at = excluded.updated_at`,
+      [
+        shopDomain,
+        cart.cartId,
+        new Uint8Array(shopify.nonce),
+        new Uint8Array(shopify.ciphertext),
+        cart.extensions === null ? null : JSON.stringify(cart.extensions),
+        cart.createdAt,
+        cart.updatedAt,
+      ],
+    );
+    this.db.run("DELETE FROM cart_line");
+    for (let position = 0; position < cart.lines.length; position += 1) {
+      const line = cart.lines[position];
+      if (line === undefined) {
+        continue;
+      }
+      const encrypted = encryptSecret(this.key, line.lineGid, lineAad(shopDomain, line.itemId));
+      this.db.run(
+        `INSERT INTO cart_line (item_id, position, line_nonce, line_ciphertext) VALUES (?, ?, ?, ?)`,
+        [line.itemId, position, new Uint8Array(encrypted.nonce), new Uint8Array(encrypted.ciphertext)],
+      );
+    }
+    this.persist();
+  }
+
+  clearAnonymousCart(): void {
+    this.db.run("DELETE FROM cart_line");
+    this.db.run("DELETE FROM anonymous_cart");
+    this.persist();
+  }
+
+  lookupIdempotency(scope: string, key: string, fingerprint: string, now: number): IdempotencyLookup {
+    const row = this.one(
+      `SELECT fingerprint, status, body_json, expires_at
+       FROM idempotency_record WHERE scope = ? AND idempotency_key = ?`,
+      [scope, key],
+    );
+    if (row === undefined) {
+      return { kind: "miss" };
+    }
+    const expiresAt = readNullableInt(row, "expires_at");
+    if (expiresAt === null || expiresAt <= now) {
+      this.deleteIdempotency(scope, key);
+      return { kind: "miss" };
+    }
+    const storedFingerprint = readString(row, "fingerprint");
+    const status = readNullableInt(row, "status");
+    const bodyJson = readString(row, "body_json");
+    if (storedFingerprint === null || status === null || bodyJson === null) {
+      this.deleteIdempotency(scope, key);
+      return { kind: "miss" };
+    }
+    if (storedFingerprint !== fingerprint) {
+      return { kind: "conflict" };
+    }
+    try {
+      return { kind: "replay", status, body: JSON.parse(bodyJson) as unknown };
+    } catch {
+      this.deleteIdempotency(scope, key);
+      return { kind: "miss" };
+    }
+  }
+
+  rememberIdempotency(
+    scope: string,
+    key: string,
+    fingerprint: string,
+    status: number,
+    body: unknown,
+    expiresAt: number,
+  ): void {
+    if (status < 200 || status >= 300) {
+      return;
+    }
+    this.db.run(
+      `INSERT INTO idempotency_record (scope, idempotency_key, fingerprint, status, body_json, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(scope, idempotency_key) DO UPDATE SET
+         fingerprint = excluded.fingerprint,
+         status = excluded.status,
+         body_json = excluded.body_json,
+         expires_at = excluded.expires_at`,
+      [scope, key, fingerprint, status, JSON.stringify(body), expiresAt],
+    );
+    this.persist();
+  }
+
+  clearIdempotency(): void {
+    this.db.run("DELETE FROM idempotency_record");
+    this.persist();
+  }
+
+  private cartLines(shopDomain: string): StoredCartLine[] {
+    const stmt = this.db.prepare(
+      `SELECT item_id, position, line_nonce, line_ciphertext FROM cart_line ORDER BY position ASC`,
+    );
+    const lines: StoredCartLine[] = [];
+    try {
+      while (stmt.step()) {
+        const row = stmt.getAsObject();
+        const itemId = readString(row, "item_id");
+        const position = readNullableInt(row, "position");
+        if (itemId === null || position === null) {
+          throw new TokenDecryptError();
+        }
+        const lineGid = this.readSecret(row, "line", lineAad(shopDomain, itemId));
+        if (lineGid === null) {
+          throw new TokenDecryptError();
+        }
+        lines.push({ itemId, lineGid });
+      }
+    } finally {
+      stmt.free();
+    }
+    return lines;
+  }
+
+  private deleteIdempotency(scope: string, key: string): void {
+    this.db.run(`DELETE FROM idempotency_record WHERE scope = ? AND idempotency_key = ?`, [scope, key]);
+    this.persist();
+  }
+
   private readSecret(row: Record<string, SqlValue>, field: string, aad: string): string | null {
     const nonce = row[`${field}_nonce`];
     const ciphertext = row[`${field}_ciphertext`];
@@ -311,6 +527,45 @@ function readNullableInt(row: Record<string, SqlValue>, key: string): number | n
     throw new TokenDecryptError();
   }
   return value;
+}
+
+export type StoredCartLine = {
+  itemId: string;
+  lineGid: string;
+};
+
+export type StoredCart = {
+  cartId: string;
+  shopifyCartId: string;
+  extensions: Record<string, unknown> | null;
+  createdAt: number;
+  updatedAt: number;
+  lines: StoredCartLine[];
+};
+
+export type IdempotencyLookup =
+  | { kind: "miss" }
+  | { kind: "replay"; status: number; body: unknown }
+  | { kind: "conflict" };
+
+function cartAad(shopDomain: string): string {
+  return `${shopDomain}\u0000cart`;
+}
+
+function lineAad(shopDomain: string, itemId: string): string {
+  return `${shopDomain}\u0000line\u0000${itemId}`;
+}
+
+function readExtensions(value: SqlValue | undefined): Record<string, unknown> | null {
+  if (typeof value !== "string" || value === "") {
+    return null;
+  }
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return isRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 function readGrant(row: Record<string, SqlValue>): GrantType | null {

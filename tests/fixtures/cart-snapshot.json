@@ -1,0 +1,68 @@
+{
+  "data": {
+    "cartCreate": {
+      "cart": {
+        "id": "gid://shopify/Cart/c1?key=super-secret-cart-key",
+        "checkoutUrl": "https://example.myshopify.com/cart/c/c1?key=super-secret-cart-key",
+        "attributes": [
+          {
+            "key": "note",
+            "value": "gid://shopify/Cart/c1?key=super-secret-cart-key"
+          }
+        ],
+        "lines": {
+          "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+          },
+          "nodes": [
+            {
+              "id": "gid://shopify/CartLine/line-a",
+              "quantity": 1,
+              "merchandise": {
+                "id": "gid://shopify/ProductVariant/2001",
+                "title": "Default Title",
+                "selectedOptions": [
+                  {
+                    "name": "Color",
+                    "value": "Black"
+                  }
+                ],
+                "product": {
+                  "title": "ACME Wireless Headphones Pro"
+                }
+              },
+              "cost": {
+                "amountPerQuantity": {
+                  "amount": "19.99",
+                  "currencyCode": "USD"
+                },
+                "totalAmount": {
+                  "amount": "19.99",
+                  "currencyCode": "USD"
+                }
+              }
+            }
+          ]
+        },
+        "cost": {
+          "subtotalAmount": {
+            "amount": "19.99",
+            "currencyCode": "USD"
+          },
+          "totalAmount": {
+            "amount": "30.00",
+            "currencyCode": "USD"
+          },
+          "totalTaxAmount": {
+            "amount": "10.00",
+            "currencyCode": "USD"
+          },
+          "totalDutyAmount": null
+        },
+        "discountAllocations": []
+      },
+      "userErrors": []
+    }
+  }
+}

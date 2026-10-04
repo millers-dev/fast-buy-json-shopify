@@ -37,11 +37,33 @@ export function minorUnitScale(currency: string): number {
 
 /** Parse a Shopify decimal string into a JSON number at the currency's minor-unit scale. */
 export function moneyAmount(amount: string, currency: string): number | null {
+  const scale = minorUnitScale(currency);
+  const minor = decimalToMinor(amount, scale);
+  if (minor === null) {
+    return null;
+  }
+  return minorToNumber(minor, scale);
+}
+
+/** Sum Shopify decimal strings in minor units, then emit one JSON number. */
+export function sumMoney(amounts: readonly string[], currency: string): number | null {
+  const scale = minorUnitScale(currency);
+  let total = 0n;
+  for (const amount of amounts) {
+    const minor = decimalToMinor(amount, scale);
+    if (minor === null) {
+      return null;
+    }
+    total += minor;
+  }
+  return minorToNumber(total, scale);
+}
+
+function decimalToMinor(amount: string, scale: number): bigint | null {
   const match = DECIMAL.exec(amount.trim());
   if (match === null) {
     return null;
   }
-  const scale = minorUnitScale(currency);
   const negative = match[1] === "-";
   const whole = parseDigits(match[2] ?? "0");
   const fraction = match[3] ?? "";
@@ -61,7 +83,7 @@ export function moneyAmount(amount: string, currency: string): number | null {
   if (negative) {
     minor = -minor;
   }
-  return minorToNumber(minor, scale);
+  return minor;
 }
 
 function parseDigits(digits: string): bigint {
