@@ -1,17 +1,35 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 
-import { buildDetectResponse } from "./detect.js";
+import { prepareCommerceAccess } from "./commerce-token.js";
 import type { ConnectorConfig } from "./config.js";
+import type { ConnectorDeps } from "./deps.js";
+import { buildDetectResponse } from "./detect.js";
+import {
+  AUTH_CALLBACK_PATH,
+  AUTH_PATH,
+  handleAuthCallback,
+  handleAuthStart,
+  handleWebhook,
+  isWebhookPath,
+} from "./http-auth.js";
+import { writeJson, writeProblem, writeUnexpected } from "./http-response.js";
+import { internalError } from "./problems.js";
 
 export const DEFAULT_PORT = 3100;
 export const BASE_PATH = "/api/fastbuyjson";
 export const DETECT_PATH = `${BASE_PATH}/detect`;
 export const DETECT_CACHE_CONTROL = "public, max-age=300";
 
-export function createConnectorServer(config: ConnectorConfig): Server {
+export function createConnectorServer(config: ConnectorConfig, deps?: ConnectorDeps): Server {
   const detectBody = JSON.stringify(buildDetectResponse(config));
   return createServer((req, res) => {
-    handle(req, res, detectBody);
+    void route(req, res, detectBody, deps).catch((error: unknown) => {
+      if (res.headersSent || res.writableEnded) {
+        return;
+      }
+      console.error(error instanceof Error ? error.name : "request failed");
+      writeUnexpected(res);
+    });
   });
 }
 
@@ -38,43 +56,65 @@ export function listen(server: Server, port: number, host?: string): Promise<num
   });
 }
 
-function handle(req: IncomingMessage, res: ServerResponse, detectBody: string): void {
-  const pathname = requestPathname(req);
-  if (pathname !== DETECT_PATH) {
-    writeJson(res, 404, { error: "not_found" }, { "Cache-Control": "no-store" });
-    return;
-  }
-  if (req.method !== "GET") {
-    writeJson(
-      res,
-      405,
-      { error: "method_not_allowed" },
-      { Allow: "GET", "Cache-Control": "no-store" },
-    );
-    return;
-  }
-
-  res.writeHead(200, {
-    "Content-Type": "application/json; charset=utf-8",
-    "Cache-Control": DETECT_CACHE_CONTROL,
-  });
-  res.end(detectBody);
-}
-
-function requestPathname(req: IncomingMessage): string {
-  const raw = req.url ?? "/";
-  return new URL(raw, "http://127.0.0.1").pathname;
-}
-
-function writeJson(
+async function route(
+  req: IncomingMessage,
   res: ServerResponse,
-  status: number,
-  body: unknown,
-  headers: Record<string, string>,
-): void {
-  res.writeHead(status, {
-    "Content-Type": "application/json; charset=utf-8",
-    ...headers,
-  });
-  res.end(JSON.stringify(body));
+  detectBody: string,
+  deps: ConnectorDeps | undefined,
+): Promise<void> {
+  const url = requestUrl(req);
+  const pathname = url.pathname;
+
+  if (pathname === DETECT_PATH) {
+    if (req.method !== "GET") {
+      writeJson(res, 405, { error: "method_not_allowed" }, { Allow: "GET", "Cache-Control": "no-store" });
+      return;
+    }
+    res.writeHead(200, {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": DETECT_CACHE_CONTROL,
+    });
+    res.end(detectBody);
+    return;
+  }
+
+  if (deps !== undefined) {
+    if (pathname === AUTH_PATH) {
+      if (req.method !== "GET") {
+        writeJson(res, 405, { error: "method_not_allowed" }, { Allow: "GET", "Cache-Control": "no-store" });
+        return;
+      }
+      await handleAuthStart(res, deps);
+      return;
+    }
+    if (pathname === AUTH_CALLBACK_PATH) {
+      if (req.method !== "GET") {
+        writeJson(res, 405, { error: "method_not_allowed" }, { Allow: "GET", "Cache-Control": "no-store" });
+        return;
+      }
+      await handleAuthCallback(res, url, deps);
+      return;
+    }
+    if (isWebhookPath(pathname)) {
+      await handleWebhook(req, res, pathname, deps);
+      return;
+    }
+    if (isCommercePath(pathname)) {
+      const access = await prepareCommerceAccess(deps);
+      if (access.kind === "unavailable") {
+        writeProblem(res, internalError(access.detail));
+        return;
+      }
+    }
+  }
+
+  writeJson(res, 404, { error: "not_found" }, { "Cache-Control": "no-store" });
+}
+
+function isCommercePath(pathname: string): boolean {
+  return pathname.startsWith(`${BASE_PATH}/`) && pathname !== DETECT_PATH;
+}
+
+function requestUrl(req: IncomingMessage): URL {
+  return new URL(req.url ?? "/", "http://127.0.0.1");
 }

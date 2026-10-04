@@ -12,4 +12,7 @@ logs/
 coverage/
 *.sqlite
 *.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite.tmp
 *.db

@@ -1,26 +1,44 @@
 import { pathToFileURL } from "node:url";
 
-import { loadConfig, readPort } from "./config.js";
+import { loadConfig, loadShopifyAuth, readPort } from "./config.js";
 import { DEFAULT_PORT, createConnectorServer, listen } from "./server.js";
+import { openConnector } from "./startup.js";
 import { readPackageMetadata } from "./version.js";
 
 export function start(env: NodeJS.ProcessEnv = process.env): void {
   const metadata = readPackageMetadata();
   const config = loadConfig(env, metadata.version);
   const port = readPort(env, DEFAULT_PORT);
-  const server = createConnectorServer(config);
-  listen(server, port)
-    .then((bound) => {
-      const shop = config.shopDomain ?? "unset";
-      console.log(
-        `FastBuyJSON Shopify connector at http://localhost:${bound}/api/fastbuyjson/detect (shop ${shop})`,
-      );
-    })
-    .catch((error: unknown) => {
-      const message = error instanceof Error ? error.message : "failed to listen";
-      console.error(message);
-      process.exit(1);
-    });
+  const auth = loadShopifyAuth(env);
+  void boot(config, port, auth).catch((error: unknown) => {
+    console.error(error instanceof Error ? error.message : "failed to start");
+    process.exit(1);
+  });
+}
+
+async function boot(
+  config: ReturnType<typeof loadConfig>,
+  port: number,
+  auth: ReturnType<typeof loadShopifyAuth>,
+): Promise<void> {
+  const deps = auth === undefined ? undefined : await openConnector(auth);
+  const server = createConnectorServer(config, deps);
+  const bound = await listen(server, port);
+  const shop = config.shopDomain ?? "unset";
+  const mode = authMode(auth);
+  console.log(
+    `FastBuyJSON Shopify connector at http://localhost:${bound}/api/fastbuyjson/detect (shop ${shop}, ${mode})`,
+  );
+}
+
+function authMode(auth: ReturnType<typeof loadShopifyAuth>): string {
+  if (auth === undefined) {
+    return "detect-only";
+  }
+  if (auth.appUrl === undefined) {
+    return "client-credentials";
+  }
+  return "authorization-code";
 }
 
 function isDirectRun(): boolean {
