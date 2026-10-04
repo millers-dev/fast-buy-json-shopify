@@ -7,7 +7,6 @@ import { Ajv, type ErrorObject } from "ajv";
 import { mapCatalogProduct, type CatalogProduct } from "./catalog-map.js";
 import {
   MAX_PRODUCT_SCAN,
-  PRODUCTS_CONNECTION_TOTAL_COUNT_ON_2026_10,
   SHOPIFY_CONNECTION_PAGE,
   type CatalogSort,
   isCatalogSort,
@@ -16,13 +15,14 @@ import {
   PRODUCTS_DOCUMENT,
   SEARCH_DOCUMENT,
   SHOP_CURRENCY_DOCUMENT,
-  availabilityOutcome,
+  VARIANT_PAGE_DOCUMENT,
+  availabilityWanted,
   buildProductsQuery,
   buildSearchFilters,
-  buildSearchText,
   isAvailability,
   sortVariables,
   type CatalogFilters,
+  type MappedAvailability,
 } from "./catalog-query.js";
 import { prepareCommerceAccess } from "./commerce-token.js";
 import { ensureDelegateToken, installedProblem } from "./delegate-token.js";
@@ -61,7 +61,6 @@ type ParsedSearch = {
 
 type WalkResult =
   | { kind: "ok"; nodes: unknown[]; totalItems: number }
-  | { kind: "scan" }
   | { kind: "throttled" }
   | { kind: "unauthorized" }
   | { kind: "failed" };
@@ -87,7 +86,7 @@ export async function handleProductSearch(
     writeProblem(res, internalError(access.detail));
     return;
   }
-  if (availabilityOutcome(request.filters?.availability) === "empty") {
+  if (availabilityWanted(request.filters?.availability) === "empty") {
     const missing = await deps.tokens.exclusive(async () => installedProblem(deps));
     if (missing !== undefined) {
       writeProblem(res, missing);
@@ -125,21 +124,24 @@ export async function handleProductSearch(
   }
 
   const walked = await walkCatalog(deps, delegate.token, buyerIp, request);
-  if (walked.kind === "scan") {
-    writeProblem(res, scanProblem());
-    return;
-  }
   if (walked.kind !== "ok") {
     await writeCallFailure(res, deps, walked.kind);
     return;
   }
+  const expanded = await expandVariantPages(deps, delegate.token, buyerIp, walked.nodes);
+  if (expanded.kind !== "ok") {
+    await writeCallFailure(res, deps, expanded.kind);
+    return;
+  }
 
+  const wanted = availabilityWanted(request.filters?.availability);
   const results: CatalogProduct[] = [];
-  for (const node of walked.nodes) {
+  for (const node of expanded.nodes) {
     const product = mapCatalogProduct(node);
-    if (product !== null) {
-      results.push(product);
+    if (product === null || !keepProduct(node, product, request, wanted)) {
+      continue;
     }
+    results.push(product);
   }
   writeJson(res, 200, pageBody(results, request.page, request.pageSize, walked.totalItems), NO_STORE);
 }
@@ -291,7 +293,7 @@ async function walkCatalog(
   const base =
     mode === "search"
       ? {
-          query: buildSearchText(request.query ?? "", request.filters?.categories),
+          query: request.query ?? "",
           sortKey: sort.sortKey,
           reverse: sort.reverse,
           productFilters: buildSearchFilters(request.filters),
@@ -303,21 +305,18 @@ async function walkCatalog(
         };
   const document = mode === "search" ? SEARCH_DOCUMENT : PRODUCTS_DOCUMENT;
   const offset = (request.page - 1) * request.pageSize;
+  const end = offset + request.pageSize;
   let scanned = 0;
   let after: string | null = null;
   let searchTotal: number | undefined;
   let exhausted = false;
   const selected: unknown[] = [];
 
-  while (scanned < MAX_PRODUCT_SCAN) {
-    if (mode === "search" && searchTotal !== undefined && (offset >= searchTotal || scanned >= offset + request.pageSize)) {
+  while (scanned < end) {
+    if (mode === "search" && searchTotal !== undefined && (offset >= searchTotal || scanned >= end)) {
       break;
     }
-    const budget = MAX_PRODUCT_SCAN - scanned;
-    const first =
-      mode === "products"
-        ? Math.min(SHOPIFY_CONNECTION_PAGE, budget)
-        : Math.min(SHOPIFY_CONNECTION_PAGE, budget, Math.max(offset + request.pageSize - scanned, 1));
+    const first = Math.min(SHOPIFY_CONNECTION_PAGE, end - scanned);
     const call = await storefront(deps, token, buyerIp, document, { ...base, first, after });
     if (call.kind !== "ok") {
       return { kind: call.kind };
@@ -335,7 +334,7 @@ async function walkCatalog(
     for (let index = 0; index < page.nodes.length; index += 1) {
       const absolute = scanned + index;
       const node = page.nodes[index];
-      if (node !== undefined && absolute >= offset && absolute < offset + request.pageSize) {
+      if (node !== undefined && absolute >= offset && absolute < end) {
         selected.push(node);
       }
     }
@@ -351,6 +350,9 @@ async function walkCatalog(
       exhausted = true;
       break;
     }
+    if (scanned >= end) {
+      break;
+    }
     after = page.endCursor;
   }
 
@@ -360,10 +362,121 @@ async function walkCatalog(
     }
     return { kind: "ok", nodes: selected, totalItems: searchTotal };
   }
-  if (PRODUCTS_CONNECTION_TOTAL_COUNT_ON_2026_10 || !exhausted) {
-    return PRODUCTS_CONNECTION_TOTAL_COUNT_ON_2026_10 ? { kind: "failed" } : { kind: "scan" };
+  return { kind: "ok", nodes: selected, totalItems: exhausted ? scanned : scanned + 1 };
+}
+
+const VARIANT_PAGE_LIMIT = 30;
+
+async function expandVariantPages(
+  deps: ConnectorDeps,
+  token: string,
+  buyerIp: string | undefined,
+  nodes: unknown[],
+): Promise<{ kind: "ok"; nodes: unknown[] } | { kind: "throttled" | "unauthorized" | "failed" }> {
+  const expanded: unknown[] = [];
+  for (const node of nodes) {
+    const completed = await expandOneProduct(deps, token, buyerIp, node);
+    if (completed.kind !== "ok") {
+      return completed;
+    }
+    expanded.push(completed.node);
   }
-  return { kind: "ok", nodes: selected, totalItems: scanned };
+  return { kind: "ok", nodes: expanded };
+}
+
+async function expandOneProduct(
+  deps: ConnectorDeps,
+  token: string,
+  buyerIp: string | undefined,
+  node: unknown,
+): Promise<{ kind: "ok"; node: unknown } | { kind: "throttled" | "unauthorized" | "failed" }> {
+  if (!isRecord(node) || !isRecord(node.variants) || typeof node.id !== "string") {
+    return { kind: "ok", node };
+  }
+  const connection = readVariantConnection(node.variants);
+  if (connection === null || !connection.hasNextPage) {
+    return { kind: "ok", node };
+  }
+  const nodes = [...connection.nodes];
+  let after = connection.endCursor;
+  let hasNextPage = true;
+  for (let page = 0; hasNextPage && page < VARIANT_PAGE_LIMIT; page += 1) {
+    if (after === null) {
+      return { kind: "failed" };
+    }
+    const call = await storefront(deps, token, buyerIp, VARIANT_PAGE_DOCUMENT, { id: node.id, after });
+    if (call.kind !== "ok") {
+      return { kind: call.kind };
+    }
+    const next = readVariantProduct(call.data);
+    if (next === null) {
+      return { kind: "failed" };
+    }
+    nodes.push(...next.nodes);
+    hasNextPage = next.hasNextPage;
+    after = next.endCursor;
+  }
+  if (hasNextPage) {
+    return { kind: "failed" };
+  }
+  return {
+    kind: "ok",
+    node: {
+      ...node,
+      variants: {
+        pageInfo: { hasNextPage: false, endCursor: after },
+        nodes,
+      },
+    },
+  };
+}
+
+function keepProduct(
+  node: unknown,
+  product: CatalogProduct,
+  request: ParsedSearch,
+  wanted: "all" | "empty" | MappedAvailability[],
+): boolean {
+  if (wanted !== "all" && wanted !== "empty") {
+    const status = product.availability?.status;
+    if (status !== "in_stock" && status !== "out_of_stock" && status !== "backorder") {
+      return false;
+    }
+    if (!wanted.includes(status)) {
+      return false;
+    }
+  }
+  const range = request.filters?.priceRange;
+  if (range !== undefined) {
+    if (range.min !== undefined && product.price.amount < range.min) {
+      return false;
+    }
+    if (range.max !== undefined && product.price.amount > range.max) {
+      return false;
+    }
+  }
+  const categories = request.filters?.categories;
+  if (categories !== undefined && categories.length > 0 && !categoryMatches(node, categories)) {
+    return false;
+  }
+  return true;
+}
+
+function categoryMatches(node: unknown, categories: string[]): boolean {
+  if (!isRecord(node)) {
+    return false;
+  }
+  const productType = typeof node.productType === "string" ? node.productType : undefined;
+  const tags = Array.isArray(node.tags) ? node.tags : [];
+  for (const category of categories) {
+    if (productType === category) {
+      return true;
+    }
+    if (tags.some((tag) => tag === category)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 type ConnectionPage = {
@@ -393,6 +506,19 @@ function parseProductsPage(data: unknown): ConnectionPage | null {
     return null;
   }
   return readConnection(data.products);
+}
+
+function readVariantProduct(data: unknown): { nodes: unknown[]; hasNextPage: boolean; endCursor: string | null } | null {
+  if (!isRecord(data) || !isRecord(data.product) || !isRecord(data.product.variants)) {
+    return null;
+  }
+  return readVariantConnection(data.product.variants);
+}
+
+function readVariantConnection(
+  connection: Record<string, unknown>,
+): { nodes: unknown[]; hasNextPage: boolean; endCursor: string | null } | null {
+  return readConnection(connection);
 }
 
 function readConnection(

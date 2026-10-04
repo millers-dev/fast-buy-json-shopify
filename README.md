@@ -55,7 +55,9 @@ When a stored token must be refreshed before a commerce call and the refresh fai
 
 ## Catalog
 
-`POST /api/fastbuyjson/products/search` reads the Storefront API at the pinned version in `src/api-version.ts`. A text `query` uses Storefront `search`. A filters-only request uses `products`. Pagination stays the contract's `page` / `pageSize` (1-based, `pageSize` at most 100). The connector walks cursors for `page > 1` and returns **400** `VALIDATION_ERROR` if that walk would scan more than 1000 matching items.
+`POST /api/fastbuyjson/products/search` reads the Storefront API at the pinned version in `src/api-version.ts`. A text `query` uses Storefront `search`. A filters-only request uses `products`. Pagination stays the contract's `page` / `pageSize` (1-based, `pageSize` at most 100). The connector walks cursors for `page > 1` and returns **400** `VALIDATION_ERROR` when `page * pageSize` would scan more than 1000 matching items. A filters-only page does not walk the rest of the `products` connection. `search.totalCount` is `totalItems` for a text query. `products` has no `totalCount`; when the page ends the connection, `totalItems` is the number of nodes read, and when another page exists it is that number plus one.
+
+`filters.availability` keeps a product only when its mapped status is in the requested set. `in_stock` and `backorder` are not both `available: true`. A categories filter matches `product_type` or tag and is not appended to the caller search text. `priceRange` is an inclusive bound on the minimum variant price. `availability.quantity` sums `quantityAvailable` across variant pages and is omitted when any variant quantity is null.
 
 The first catalog call mints a delegate token with `delegateAccessTokenCreate`, limited to the four unauthenticated scopes above, and stores it encrypted in the same SQLite file. Storefront requests send that token as `Shopify-Storefront-Private-Token`. A public Storefront token is not minted, and the delegate token is not returned to the agent. Saving a new Admin token clears the delegate; the next catalog call mints another.
 

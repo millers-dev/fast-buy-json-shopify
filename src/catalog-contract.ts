@@ -66,10 +66,19 @@ export const CURRENTLY_NOT_IN_STOCK_ON_2026_10 = {
 export const PRODUCTS_CONNECTION_TOTAL_COUNT_ON_2026_10 = false;
 
 export const FILTERS_ONLY_TOTAL_ITEMS =
-  "ProductConnection on Storefront API 2026-10 has no totalCount (the products query returns edges, nodes, filters, and pageInfo). totalItems is the number of product nodes walked until pageInfo.hasNextPage is false. If that walk would read more than 1000 nodes, the route returns 400 VALIDATION_ERROR. The connector does not invent a count.";
+  "ProductConnection on Storefront API 2026-10 has no totalCount (the products query returns edges, nodes, filters, and pageInfo). Page 1 reads only pageSize nodes and does not walk the rest of the catalog, so a shop with more than 1000 products does not return 400 on page 1. Cursor walks for page > 1 return 400 VALIDATION_ERROR when page * pageSize would scan more than 1000 matching items. When pageInfo.hasNextPage is false after the nodes read for this page, totalItems is that node count. When hasNextPage is still true, totalItems is the number of nodes read plus one, because another node exists and this request does not scan it. The connector does not invent a count.";
 
 export const PRODUCT_QUANTITY_ON_2026_10 =
-  "Product has no quantityAvailable on Storefront API 2026-10 (the field is on ProductVariant). availability.quantity is the sum of variant quantityAvailable when every returned variant has a number, and is omitted when any returned variant has null.";
+  "Product has no quantityAvailable on Storefront API 2026-10 (the field is on ProductVariant). availability.quantity is the sum of variant quantityAvailable across every variant page, and is omitted when any returned variant has null. A first page of 100 variants is not the product quantity when pageInfo.hasNextPage is true.";
+
+export const AVAILABILITY_FILTER_ON_2026_10 =
+  "filters.availability is a subset of the mapped availability.status. in_stock and backorder do not both collapse to available:true. A mix that includes out_of_stock does not turn the filter off. Shopify's available flag cannot tell in_stock from backorder (currentlyNotInStock), so a product is returned only when its mapped status is in the requested set.";
+
+export const CATEGORIES_FILTER_ON_2026_10 =
+  "A categories filter matches product_type or tag. Collection titles are not an exact any-match. The category clause is not appended to the caller search query, so a query that contains OR or quotes cannot bypass it. ProductFilter on 2026-10 ANDs different keys and ORs the same key, so productType and tag cannot express that OR as productFilters. The OR is applied to productType and tags. A filters-only products query still sends the quoted product_type OR tag clause, because that string is not the caller text.";
+
+export const PRICE_RANGE_ON_2026_10 =
+  "priceRange is an inclusive bound on product price.amount, which is the minimum variant price. variants.price and ProductFilter.price are not that minimum: another variant inside the range does not put the product inside when the minimum is outside. Those Shopify price filters are not sent. A currency other than the shop currency is 400 VALIDATION_ERROR with no conversion.";
 
 export function isCatalogSort(value: unknown): value is CatalogSort {
   return typeof value === "string" && (SORTS as readonly string[]).includes(value);

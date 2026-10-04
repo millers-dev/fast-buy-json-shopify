@@ -24,6 +24,7 @@
           "images": { "nodes": [] },
           "collections": { "nodes": [] },
           "variants": {
+            "pageInfo": { "hasNextPage": false, "endCursor": null },
             "nodes": [
               {
                 "id": "gid://shopify/ProductVariant/3001",

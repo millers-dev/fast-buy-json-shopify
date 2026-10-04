@@ -21,6 +21,7 @@
           },
           "collections": { "nodes": [{ "title": "Summer Drop" }] },
           "variants": {
+            "pageInfo": { "hasNextPage": false, "endCursor": null },
             "nodes": [
               {
                 "id": "gid://shopify/ProductVariant/2001",
@@ -59,6 +60,7 @@
           "images": { "nodes": [] },
           "collections": { "nodes": [] },
           "variants": {
+            "pageInfo": { "hasNextPage": false, "endCursor": null },
             "nodes": [
               {
                 "id": "gid://shopify/ProductVariant/2003",
@@ -83,6 +85,7 @@
           "images": { "nodes": [] },
           "collections": { "nodes": [] },
           "variants": {
+            "pageInfo": { "hasNextPage": false, "endCursor": null },
             "nodes": [
               {
                 "id": "gid://shopify/ProductVariant/2004",

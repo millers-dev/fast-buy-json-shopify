@@ -29,6 +29,7 @@ fragment CatalogProduct on Product {
   images(first: ${IMAGE_PAGE_SIZE}) { nodes { url altText } }
   collections(first: ${COLLECTION_PAGE_SIZE}) { nodes { title } }
   variants(first: ${VARIANT_PAGE_SIZE}) {
+    pageInfo { hasNextPage endCursor }
     nodes {
       id
       availableForSale
@@ -36,6 +37,23 @@ fragment CatalogProduct on Product {
       quantityAvailable
       selectedOptions { name value }
       price { amount currencyCode }
+    }
+  }
+}`;
+
+export const VARIANT_PAGE_DOCUMENT = `
+query CatalogVariantPage($id: ID!, $after: String) {
+  product(id: $id) {
+    variants(first: ${VARIANT_PAGE_SIZE}, after: $after) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        id
+        availableForSale
+        currentlyNotInStock
+        quantityAvailable
+        selectedOptions { name value }
+        price { amount currencyCode }
+      }
     }
   }
 }`;
@@ -106,65 +124,35 @@ export function buildProductsQuery(filters: CatalogFilters | undefined): string 
   if (categories !== undefined) {
     parts.push(categories);
   }
-  if (filters.priceRange?.min !== undefined) {
-    parts.push(`variants.price:>=${formatBound(filters.priceRange.min)}`);
-  }
-  if (filters.priceRange?.max !== undefined) {
-    parts.push(`variants.price:<=${formatBound(filters.priceRange.max)}`);
-  }
-  const availability = availabilityClause(filters.availability);
-  if (availability === "true") {
-    parts.push("available_for_sale:true");
-  }
-  if (availability === "false") {
-    parts.push("available_for_sale:false");
-  }
   if (parts.length === 0) {
     return undefined;
   }
   return parts.join(" ");
 }
 
-export function buildSearchText(query: string, categories: string[] | undefined): string {
-  const categoriesClause = categoryClause(categories);
-  if (categoriesClause === undefined) {
-    return query;
-  }
-  return `${query} AND ${categoriesClause}`;
-}
-
 export function buildSearchFilters(filters: CatalogFilters | undefined): Record<string, unknown>[] | null {
-  if (filters === undefined) {
+  if (filters?.brand === undefined) {
     return null;
   }
-  const productFilters: Record<string, unknown>[] = [];
-  if (filters.brand !== undefined) {
-    productFilters.push({ productVendor: filters.brand });
-  }
-  if (filters.priceRange?.min !== undefined || filters.priceRange?.max !== undefined) {
-    const price: Record<string, number> = {};
-    if (filters.priceRange.min !== undefined) {
-      price.min = filters.priceRange.min;
-    }
-    if (filters.priceRange.max !== undefined) {
-      price.max = filters.priceRange.max;
-    }
-    productFilters.push({ price });
-  }
-  const availability = availabilityClause(filters.availability);
-  if (availability === "true") {
-    productFilters.push({ available: true });
-  }
-  if (availability === "false") {
-    productFilters.push({ available: false });
-  }
-  return productFilters.length > 0 ? productFilters : null;
+  return [{ productVendor: filters.brand }];
 }
 
-export function availabilityOutcome(
+export type MappedAvailability = "in_stock" | "out_of_stock" | "backorder";
+
+export function availabilityWanted(
   values: string[] | undefined,
-): "none" | "empty" | "true" | "false" {
-  return availabilityClause(values);
+): "all" | "empty" | MappedAvailability[] {
+  if (values === undefined || values.length === 0) {
+    return "all";
+  }
+  const wanted: MappedAvailability[] = [];
+  for (const value of values) {
+    if (!isMappedAvailability(value) || wanted.includes(value)) {
+      continue;
+    }
+    wanted.push(value);
+  }
+  return wanted.length === 0 ? "empty" : wanted;
 }
 
 export function sortVariables(
@@ -188,35 +176,12 @@ function categoryClause(categories: string[] | undefined): string | undefined {
   return `(${terms.join(" OR ")})`;
 }
 
-function availabilityClause(values: string[] | undefined): "none" | "empty" | "true" | "false" {
-  if (values === undefined || values.length === 0) {
-    return "none";
-  }
-  const wanted = new Set(values.filter(isActionableAvailability));
-  if (wanted.size === 0) {
-    return "empty";
-  }
-  const wantsAvailable = wanted.has("in_stock") || wanted.has("backorder");
-  const wantsOut = wanted.has("out_of_stock");
-  if (wantsAvailable && wantsOut) {
-    return "none";
-  }
-  if (wantsOut) {
-    return "false";
-  }
-  return "true";
-}
-
-function isActionableAvailability(value: string): value is "in_stock" | "out_of_stock" | "backorder" {
+function isMappedAvailability(value: string): value is MappedAvailability {
   return value === "in_stock" || value === "out_of_stock" || value === "backorder";
 }
 
 function quoteSearchValue(value: string): string {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
-}
-
-function formatBound(value: number): string {
-  return JSON.stringify(value);
 }
 
 export function isAvailability(value: unknown): value is Availability {

@@ -12,9 +12,12 @@ import addFormatsModule from "ajv-formats";
 import { SHOPIFY_API_VERSION } from "../src/api-version.js";
 import { publicBuyerIp } from "../src/buyer-ip.js";
 import {
+  AVAILABILITY_FILTER_ON_2026_10,
   BRAND_MATCH_ON_2026_10,
+  CATEGORIES_FILTER_ON_2026_10,
   CURRENTLY_NOT_IN_STOCK_ON_2026_10,
   FILTERS_ONLY_TOTAL_ITEMS,
+  PRICE_RANGE_ON_2026_10,
   PRODUCT_QUANTITY_ON_2026_10,
   PRODUCT_RELEVANCE_WITHOUT_QUERY_ON_2026_10,
   PRODUCTS_CONNECTION_TOTAL_COUNT_ON_2026_10,
@@ -23,7 +26,7 @@ import {
   SORT_KEYS_ON_2026_10,
   bindSort,
 } from "../src/catalog-contract.js";
-import { DELEGATE_DOCUMENT, PRODUCTS_DOCUMENT, SEARCH_DOCUMENT } from "../src/catalog-query.js";
+import { DELEGATE_DOCUMENT, PRODUCTS_DOCUMENT, SEARCH_DOCUMENT, VARIANT_PAGE_DOCUMENT } from "../src/catalog-query.js";
 import type { ConnectorDeps } from "../src/deps.js";
 import { plainTextFromHtml } from "../src/html-text.js";
 import { moneyAmount } from "../src/money.js";
@@ -76,6 +79,15 @@ describe("Storefront API 2026-10 catalog decisions", () => {
     assert.equal(PRODUCTS_CONNECTION_TOTAL_COUNT_ON_2026_10, false);
     assert.match(FILTERS_ONLY_TOTAL_ITEMS, /no totalCount/);
     assert.match(FILTERS_ONLY_TOTAL_ITEMS, /does not invent a count/);
+    assert.match(FILTERS_ONLY_TOTAL_ITEMS, /plus one/);
+    assert.match(FILTERS_ONLY_TOTAL_ITEMS, /does not walk the rest of the catalog/);
+    assert.match(AVAILABILITY_FILTER_ON_2026_10, /subset of the mapped availability.status/);
+    assert.match(CATEGORIES_FILTER_ON_2026_10, /not appended to the caller search query/);
+    assert.match(PRICE_RANGE_ON_2026_10, /minimum variant price/);
+    assert.match(PRODUCT_QUANTITY_ON_2026_10, /every variant page/);
+    assert.equal(VARIANT_PAGE_DOCUMENT.includes("CatalogVariantPage"), true);
+    assert.equal(SEARCH_DOCUMENT.includes("variants(first:"), true);
+    assert.equal(SEARCH_DOCUMENT.includes("query AND"), false);
     assert.match(BRAND_MATCH_ON_2026_10, /not a guaranteed case-insensitive match/);
     assert.match(BRAND_MATCH_ON_2026_10, /caseInsensitiveMatch/);
     assert.match(BRAND_MATCH_ON_2026_10, /sent unchanged/);
@@ -335,7 +347,7 @@ describe("POST /api/fastbuyjson/products/search", () => {
     assert.equal(products.query.includes("products("), true);
     assert.equal(products.variables.sortKey, "TITLE");
     assert.equal(products.variables.reverse, false);
-    assert.equal(products.variables.first, 250);
+    assert.equal(products.variables.first, 10);
     const query = products.variables.query;
     assert.equal(typeof query, "string");
     assert.equal(String(query).includes('vendor:"aCmE"'), true);
@@ -343,9 +355,8 @@ describe("POST /api/fastbuyjson/products/search", () => {
     assert.equal(String(query).includes('product_type:"Headphones"'), true);
     assert.equal(String(query).includes('tag:"Headphones"'), true);
     assert.equal(String(query).includes("collection:"), false);
-    assert.equal(String(query).includes("variants.price:>=10"), true);
-    assert.equal(String(query).includes("variants.price:<=20"), true);
-    assert.equal(String(query).includes("available_for_sale:true"), true);
+    assert.equal(String(query).includes("variants.price"), false);
+    assert.equal(String(query).includes("available_for_sale"), false);
   });
 
   it("rejects a priceRange currency that is not the shop currency", async () => {
@@ -364,6 +375,226 @@ describe("POST /api/fastbuyjson/products/search", () => {
     assert.equal(graphqlCall(calls, 1).query.includes("currencyCode"), true);
     assert.equal(graphqlCall(calls, 1).query.includes("products("), false);
     assertSecretsAbsent(response.text);
+  });
+
+  it("keeps a product only when its mapped status is in the availability set", async () => {
+    const catalog = loadFixture("search-catalog.json") as { data: { search: Record<string, unknown> } };
+    script.push(() => jsonResponse(200, loadFixture("delegate-token.json")));
+    script.push(() => jsonResponse(200, { data: { products: catalog.data.search } }));
+    const inStock = await postSearch(base, { filters: { availability: ["in_stock"] } });
+    assert.equal(inStock.status, 200);
+    const inStockBody = inStock.json as SearchBody;
+    assert.deepEqual(inStockBody.results.map((item) => item.id), ["gid://shopify/Product/1001"]);
+    assert.equal(inStockBody.results[0]?.availability?.status, "in_stock");
+    const inStockQuery = graphqlCall(calls, 1);
+    assert.equal(String(inStockQuery.variables.query ?? "").includes("available_for_sale"), false);
+    assert.equal(inStockQuery.query.includes("available:"), false);
+
+    calls.length = 0;
+    script.push(() => jsonResponse(200, { data: { products: catalog.data.search } }));
+    const mixed = await postSearch(base, { filters: { availability: ["in_stock", "out_of_stock"] } });
+    assert.equal(mixed.status, 200);
+    const mixedBody = mixed.json as SearchBody;
+    assert.deepEqual(
+      mixedBody.results.map((item) => item.availability?.status).sort(),
+      ["in_stock", "out_of_stock"],
+    );
+    assert.equal(mixedBody.results.some((item) => item.availability?.status === "backorder"), false);
+    assert.equal(String(graphqlCall(calls, 0).variables.query ?? "").includes("available_for_sale"), false);
+
+    calls.length = 0;
+    script.push(() => jsonResponse(200, loadFixture("search-catalog.json")));
+    const backorder = await postSearch(base, { query: "headphones", filters: { availability: ["backorder"] } });
+    assert.equal(backorder.status, 200);
+    const backorderBody = backorder.json as SearchBody;
+    assert.deepEqual(backorderBody.results.map((item) => item.id), ["gid://shopify/Product/1003"]);
+    assert.equal(backorderBody.pagination.totalItems, 3);
+    const searchCall = graphqlCall(calls, 0);
+    assert.equal(searchCall.variables.query, "headphones");
+    assert.equal(searchCall.variables.productFilters, null);
+  });
+
+  it("does not append categories to the search query", async () => {
+    const callerQuery = 'shirt OR hat" OR tag:"Audio';
+    script.push(() => jsonResponse(200, loadFixture("delegate-token.json")));
+    script.push(() => jsonResponse(200, loadFixture("search-catalog.json")));
+    const response = await postSearch(base, { query: callerQuery, filters: { categories: ["Audio"] } });
+    assert.equal(response.status, 200);
+    const body = response.json as SearchBody;
+    assert.deepEqual(body.results.map((item) => item.id), ["gid://shopify/Product/1001"]);
+    assert.equal(body.results[0]?.categories?.includes("Summer Drop"), true);
+    const search = graphqlCall(calls, 1);
+    assert.equal(search.variables.query, callerQuery);
+    assert.equal(String(search.variables.query).includes("product_type:"), false);
+    assert.equal(String(search.variables.query).includes(" AND "), false);
+    assert.equal(search.variables.productFilters, null);
+
+    calls.length = 0;
+    script.push(() => jsonResponse(200, loadFixture("search-catalog.json")));
+    const collectionOnly = await postSearch(base, { query: "headphones", filters: { categories: ["Summer Drop"] } });
+    assert.equal(collectionOnly.status, 200);
+    assert.deepEqual((collectionOnly.json as SearchBody).results, []);
+    assert.equal(graphqlCall(calls, 0).variables.query, "headphones");
+  });
+
+  it("filters priceRange on the minimum variant price", async () => {
+    script.push(() => jsonResponse(200, loadFixture("delegate-token.json")));
+    script.push(() => jsonResponse(200, loadFixture("shop-currency.json")));
+    script.push(() =>
+      jsonResponse(200, {
+        data: {
+          products: {
+            pageInfo: { hasNextPage: false, endCursor: null },
+            nodes: [
+              {
+                id: "gid://shopify/Product/6100",
+                title: "Minimum Inside",
+                vendor: "Acme",
+                descriptionHtml: "<p>Inside</p>",
+                productType: "Hats",
+                tags: [],
+                availableForSale: true,
+                priceRange: { minVariantPrice: { amount: "10.00", currencyCode: "USD" } },
+                images: { nodes: [] },
+                collections: { nodes: [] },
+                variants: {
+                  pageInfo: { hasNextPage: false, endCursor: null },
+                  nodes: [
+                    variantNode("gid://shopify/ProductVariant/6101", "10.00", 1),
+                    variantNode("gid://shopify/ProductVariant/6102", "80.00", 1),
+                  ],
+                },
+              },
+              {
+                id: "gid://shopify/Product/6200",
+                title: "Minimum Outside",
+                vendor: "Acme",
+                descriptionHtml: "<p>Outside</p>",
+                productType: "Hats",
+                tags: [],
+                availableForSale: true,
+                priceRange: { minVariantPrice: { amount: "5.00", currencyCode: "USD" } },
+                images: { nodes: [] },
+                collections: { nodes: [] },
+                variants: {
+                  pageInfo: { hasNextPage: false, endCursor: null },
+                  nodes: [
+                    variantNode("gid://shopify/ProductVariant/6201", "5.00", 1),
+                    variantNode("gid://shopify/ProductVariant/6202", "15.00", 1),
+                  ],
+                },
+              },
+            ],
+          },
+        },
+      }),
+    );
+    const response = await postSearch(base, { filters: { priceRange: { min: 10, max: 20, currency: "USD" } } });
+    assert.equal(response.status, 200);
+    const body = response.json as SearchBody;
+    assert.deepEqual(body.results.map((item) => item.id), ["gid://shopify/Product/6100"]);
+    assert.equal(JSON.stringify(body.results[0]?.price.amount), "10");
+    const products = graphqlCall(calls, 2);
+    assert.equal(products.variables.query, null);
+    assert.equal(products.query.includes("variants.price"), false);
+    assert.equal(products.query.includes("price:"), false);
+  });
+
+  it("sums quantityAvailable across variant pages and omits a null on a later page", async () => {
+    script.push(() => jsonResponse(200, loadFixture("delegate-token.json")));
+    script.push(() =>
+      jsonResponse(200, {
+        data: {
+          products: {
+            pageInfo: { hasNextPage: false, endCursor: null },
+            nodes: [
+              {
+                id: "gid://shopify/Product/7100",
+                title: "Paged Quantity",
+                vendor: "Acme",
+                descriptionHtml: "<p>Paged</p>",
+                productType: "Hats",
+                tags: [],
+                availableForSale: true,
+                priceRange: { minVariantPrice: { amount: "10.00", currencyCode: "USD" } },
+                images: { nodes: [] },
+                collections: { nodes: [] },
+                variants: {
+                  pageInfo: { hasNextPage: true, endCursor: "variant-cursor" },
+                  nodes: [variantNode("gid://shopify/ProductVariant/7101", "10.00", 4)],
+                },
+              },
+            ],
+          },
+        },
+      }),
+    );
+    script.push(() =>
+      jsonResponse(200, {
+        data: {
+          product: {
+            variants: {
+              pageInfo: { hasNextPage: false, endCursor: null },
+              nodes: [variantNode("gid://shopify/ProductVariant/7102", "10.00", 6)],
+            },
+          },
+        },
+      }),
+    );
+    const summed = await postSearch(base, {});
+    assert.equal(summed.status, 200);
+    const summedBody = summed.json as SearchBody;
+    assert.equal(summedBody.results[0]?.availability?.quantity, 10);
+    const variantCall = graphqlCall(calls, 2);
+    assert.equal(variantCall.query.includes("CatalogVariantPage"), true);
+    assert.equal(variantCall.variables.id, "gid://shopify/Product/7100");
+    assert.equal(variantCall.variables.after, "variant-cursor");
+
+    calls.length = 0;
+    script.push(() =>
+      jsonResponse(200, {
+        data: {
+          products: {
+            pageInfo: { hasNextPage: false, endCursor: null },
+            nodes: [
+              {
+                id: "gid://shopify/Product/7200",
+                title: "Null Later",
+                vendor: "Acme",
+                descriptionHtml: "<p>Null</p>",
+                productType: "Hats",
+                tags: [],
+                availableForSale: true,
+                priceRange: { minVariantPrice: { amount: "19.99", currencyCode: "USD" } },
+                images: { nodes: [] },
+                collections: { nodes: [] },
+                variants: {
+                  pageInfo: { hasNextPage: true, endCursor: "variant-null" },
+                  nodes: [variantNode("gid://shopify/ProductVariant/7201", "19.99", 2)],
+                },
+              },
+            ],
+          },
+        },
+      }),
+    );
+    script.push(() =>
+      jsonResponse(200, {
+        data: {
+          product: {
+            variants: {
+              pageInfo: { hasNextPage: false, endCursor: null },
+              nodes: [variantNode("gid://shopify/ProductVariant/7202", "19.99", null)],
+            },
+          },
+        },
+      }),
+    );
+    const omitted = await postSearch(base, {});
+    assert.equal(omitted.status, 200);
+    const omittedProduct = (omitted.json as SearchBody).results[0];
+    assert.equal(Object.hasOwn(omittedProduct?.availability ?? {}, "quantity"), false);
+    assert.equal(omittedProduct?.availability?.status, "in_stock");
   });
 
   it("falls back to relevance when search has no name or newest key", async () => {
@@ -395,7 +626,7 @@ describe("POST /api/fastbuyjson/products/search", () => {
     assert.equal(calls.length, 2);
   });
 
-  it("walks product cursors and stops above 1000 items", async () => {
+  it("walks cursors for a later page and does not scan a filters-only catalog on page 1", async () => {
     script.push(() => jsonResponse(200, loadFixture("delegate-token.json")));
     script.push(() => jsonResponse(200, loadFixture("products-cursor-1.json")));
     script.push(() => jsonResponse(200, loadFixture("products-cursor-2.json")));
@@ -417,23 +648,26 @@ describe("POST /api/fastbuyjson/products/search", () => {
     tokens.clearDelegate(SHOP, FIXED_NOW);
     const node = (loadFixture("search-catalog.json") as { data: { search: { nodes: unknown[] } } }).data.search.nodes[0];
     script.push(() => jsonResponse(200, loadFixture("delegate-token.json")));
-    for (let index = 0; index < 4; index += 1) {
-      script.push(() =>
-        jsonResponse(200, {
-          data: {
-            products: {
-              pageInfo: { hasNextPage: true, endCursor: `cursor-${index}` },
-              nodes: Array.from({ length: 250 }, () => node),
-            },
+    script.push(() =>
+      jsonResponse(200, {
+        data: {
+          products: {
+            pageInfo: { hasNextPage: true, endCursor: "cursor-more" },
+            nodes: Array.from({ length: 10 }, () => node),
           },
-        }),
-      );
-    }
-    const overflow = await postSearch(base, {});
-    assert.equal(overflow.status, 400);
-    assert.equal((overflow.json as { code?: string }).code, "VALIDATION_ERROR");
-    assert.equal(calls.length, 5);
-    assertSecretsAbsent(overflow.text);
+        },
+      }),
+    );
+    const firstPage = await postSearch(base, {});
+    assert.equal(firstPage.status, 200);
+    const firstBody = firstPage.json as SearchBody;
+    assert.equal(firstBody.results.length, 10);
+    assert.equal(firstBody.pagination.totalItems, 11);
+    assert.equal(firstBody.pagination.totalPages, 2);
+    assert.equal(calls.length, 2);
+    assert.equal(graphqlCall(calls, 1).variables.first, 10);
+    assert.equal(graphqlCall(calls, 1).query.includes("totalCount"), false);
+    assertSecretsAbsent(firstPage.text);
   });
 
   it("retries a Storefront throttle once", async () => {
@@ -579,6 +813,17 @@ describe("catalog without OAuth", () => {
     }
   });
 });
+
+function variantNode(id: string, amount: string, quantity: number | null) {
+  return {
+    id,
+    availableForSale: true,
+    currentlyNotInStock: false,
+    quantityAvailable: quantity,
+    selectedOptions: [{ name: "Color", value: "Black" }],
+    price: { amount, currencyCode: "USD" },
+  };
+}
 
 function sampleToken(accessExpiresAt = FIXED_NOW + 3_600_000) {
   return {

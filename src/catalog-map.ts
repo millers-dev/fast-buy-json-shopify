@@ -64,7 +64,7 @@ export function mapCatalogProduct(value: unknown): CatalogProduct | null {
     id: value.id,
     name: value.title,
     price,
-    availability: readAvailability(value.availableForSale, variants),
+    availability: readAvailability(value.availableForSale, variants?.variants, variants?.incomplete === true),
   };
   if (typeof value.vendor === "string" && value.vendor !== "") {
     product.brand = value.vendor;
@@ -83,15 +83,21 @@ export function mapCatalogProduct(value: unknown): CatalogProduct | null {
   if (images !== undefined) {
     product.images = images;
   }
-  if (variants !== undefined) {
-    product.variants = variants.map(toPublicVariant);
+  if (variants?.variants !== undefined) {
+    product.variants = variants.variants.map(toPublicVariant);
   }
   return product;
 }
 
-function readAvailability(availableForSale: boolean, variants: ParsedVariant[] | undefined): CatalogAvailability {
-  const availability: CatalogAvailability = { status: productStatus(availableForSale, variants) };
-  const quantity = productQuantity(variants);
+function readAvailability(
+  availableForSale: boolean,
+  variants: ParsedVariant[] | undefined,
+  variantsIncomplete: boolean,
+): CatalogAvailability {
+  const availability: CatalogAvailability = {
+    status: productStatus(availableForSale, variants, variantsIncomplete),
+  };
+  const quantity = productQuantity(variants, variantsIncomplete);
   if (quantity !== undefined) {
     availability.quantity = quantity;
   }
@@ -101,9 +107,13 @@ function readAvailability(availableForSale: boolean, variants: ParsedVariant[] |
 function productStatus(
   availableForSale: boolean,
   variants: ParsedVariant[] | undefined,
+  variantsIncomplete: boolean,
 ): CatalogAvailability["status"] {
   if (!availableForSale) {
     return "out_of_stock";
+  }
+  if (variantsIncomplete) {
+    return "in_stock";
   }
   const sellable = (variants ?? []).filter((variant) => variant.availableForSale);
   if (
@@ -117,8 +127,8 @@ function productStatus(
   return "in_stock";
 }
 
-function productQuantity(variants: ParsedVariant[] | undefined): number | undefined {
-  if (variants === undefined || variants.length === 0) {
+function productQuantity(variants: ParsedVariant[] | undefined, variantsIncomplete: boolean): number | undefined {
+  if (variantsIncomplete || variants === undefined || variants.length === 0) {
     return undefined;
   }
   let sum = 0;
@@ -131,10 +141,11 @@ function productQuantity(variants: ParsedVariant[] | undefined): number | undefi
   return sum;
 }
 
-function readVariants(value: unknown): ParsedVariant[] | undefined {
+function readVariants(value: unknown): { variants: ParsedVariant[] | undefined; incomplete: boolean } | undefined {
   if (!isRecord(value) || !Array.isArray(value.nodes)) {
     return undefined;
   }
+  const incomplete = isRecord(value.pageInfo) && value.pageInfo.hasNextPage === true;
   const variants: ParsedVariant[] = [];
   for (const node of value.nodes) {
     const variant = readVariant(node);
@@ -142,7 +153,7 @@ function readVariants(value: unknown): ParsedVariant[] | undefined {
       variants.push(variant);
     }
   }
-  return variants.length > 0 ? variants : undefined;
+  return { variants: variants.length > 0 ? variants : undefined, incomplete };
 }
 
 function readVariant(value: unknown): ParsedVariant | null {
