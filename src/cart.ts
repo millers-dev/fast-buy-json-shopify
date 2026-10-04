@@ -540,7 +540,7 @@ async function acceptMutation(
   };
 }
 
-async function acceptRead(
+export async function acceptRead(
   deps: ConnectorDeps,
   token: string,
   buyerIp: string | undefined,
@@ -649,7 +649,9 @@ function locateLine(
   return { kind: "ok", stored, lineGid: line.lineGid };
 }
 
-async function commerceReady(deps: ConnectorDeps): Promise<{ ok: true; token: string } | { ok: false; problem: Problem }> {
+export async function commerceReady(
+  deps: ConnectorDeps,
+): Promise<{ ok: true; token: string } | { ok: false; problem: Problem }> {
   const access = await prepareCommerceAccess(deps);
   if (access.kind === "unavailable") {
     return { ok: false, problem: internalError(access.detail) };
@@ -669,7 +671,7 @@ async function callFailure(deps: ConnectorDeps, kind: CallFailure): Promise<Publ
   return { kind: "problem", problem: internalError("The cart request could not be completed.") };
 }
 
-function storefront(
+export function storefront(
   deps: ConnectorDeps,
   token: string,
   buyerIp: string | undefined,
@@ -878,7 +880,7 @@ function writeDecryptOrThrow(res: ServerResponse, error: unknown): void {
   throw error;
 }
 
-function withCartLock<T>(fn: () => Promise<T>): Promise<T> {
+export function withCartLock<T>(fn: () => Promise<T>): Promise<T> {
   const run = cartTail.then(fn, fn);
   cartTail = run.then(
     () => undefined,

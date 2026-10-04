@@ -920,15 +920,11 @@ describe("anonymous Storefront cart", { concurrency: false }, () => {
     assert.equal(calls.length, 0);
   });
 
-  it("leaves checkout, shipping, and POST /cart unimplemented", async () => {
-    for (const path of [
-      "/api/fastbuyjson/cart",
-      "/api/fastbuyjson/checkout/initiate",
-      "/api/fastbuyjson/checkout/confirm",
-    ]) {
-      const response = await request(base, "POST", path, { productId: VARIANT_GID });
-      assert.equal(response.status, 404);
-    }
+  it("leaves shipping, orders, and POST /cart unimplemented", async () => {
+    const postCart = await request(base, "POST", "/api/fastbuyjson/cart", { productId: VARIANT_GID });
+    assert.equal(postCart.status, 404);
+    const orders = await request(base, "GET", "/api/fastbuyjson/orders/ord-1");
+    assert.equal(orders.status, 404);
     const shipping = await request(base, "GET", "/api/fastbuyjson/shipping/options");
     assert.equal(shipping.status, 404);
     const method = await request(base, "GET", "/api/fastbuyjson/cart/add");

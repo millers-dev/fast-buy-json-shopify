@@ -1,0 +1,25 @@
+{
+  "data": {
+    "cart": {
+      "deliveryGroups": {
+        "pageInfo": {
+          "hasNextPage": false,
+          "endCursor": null
+        },
+        "nodes": [
+          {
+            "id": "gid://shopify/CartDeliveryGroup/g1",
+            "deliveryOptions": [
+              {
+                "handle": "shop-standard"
+              },
+              {
+                "handle": "shop-express"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

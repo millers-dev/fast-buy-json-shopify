@@ -4,7 +4,7 @@ This repository is the Shopify store connector for [FastBuyJSON](https://github.
 
 FastBuyJSON itself — the contract, the Node and Python reference servers, the TypeScript SDK, and the stdio MCP server — stays in `millers-dev/fast-buy-json`. Point that MCP server at this process with `FASTBUYJSON_API_URL=http://localhost:3100/api/fastbuyjson`. This package is not part of that repository and it is not published to npm.
 
-It is early. The accepted plan is `docs/SHOPIFY_PLAN.md` in `millers-dev/fast-buy-json`. This tree implements discovery, one-shop OAuth, catalog search, and an anonymous cart.
+It is early. The accepted plan is `docs/SHOPIFY_PLAN.md` in `millers-dev/fast-buy-json`. This tree implements discovery, one-shop OAuth, catalog search, an anonymous cart, one discount code, and hosted checkout handoff.
 
 ## What v1 does
 
@@ -51,7 +51,7 @@ The Admin access token and refresh token are encrypted with `TOKEN_ENCRYPTION_KE
 
 `app/uninstalled` and `shop/redact` are HMAC-checked and delete that shop row. `customers/data_request` and `customers/redact` are HMAC-checked, acknowledged, and do not build a customer archive. Point them at `{APP_URL}/api/shopify/webhooks/<topic>` (slashes in the topic become path segments) or at `{APP_URL}/api/shopify/webhooks` and let `X-Shopify-Topic` select the handler.
 
-When a stored token must be refreshed before a commerce call and the refresh fails, the cached access token is cleared and the call returns **500** `INTERNAL_ERROR`. The body says the shop must be reinstalled and does not contain a token. Discounts, checkout URL, and shipping are not implemented, so those routes stay **404** while the stored token is usable.
+When a stored token must be refreshed before a commerce call and the refresh fails, the cached access token is cleared and the call returns **500** `INTERNAL_ERROR`. The body says the shop must be reinstalled and does not contain a token. Shipping options and orders are not implemented, so those routes stay **404** while the stored token is usable.
 
 ## Catalog
 
@@ -93,11 +93,23 @@ Money comes from Storefront decimal strings. Totals come from `CartCost` and are
 
 Successful cart responses send `Cache-Control: no-store`. A public TCP peer is forwarded as `Shopify-Storefront-Buyer-IP`. `127.0.0.1` is not sent. Shopify **429** or `THROTTLED` waits once, retries that call once, then returns **429** `RATE_LIMITED`.
 
+## Checkout
+
+`POST /checkout/initiate` and `POST /checkout/confirm` use the same anonymous cart and the same Storefront delegate token. A Bearer token is ignored. v1 does not take a card and does not create an order.
+
+`POST /checkout/initiate` requires the process cart. An unknown `cartId` is **404** `CART_NOT_FOUND` before any Shopify call. An empty cart is **400** `VALIDATION_ERROR` and does not open a session. Otherwise the connector updates buyer identity (email, phone or `phoneNumber`, and the shipping country), replaces the cart delivery address, and applies `discountCode` only when it is present and not blank. `null`, a missing code, or whitespace does not change codes. One code replaces the list, with the same inapplicable-code rule as `POST /cart/discount`. `region`, or `state` when `region` is absent, is sent as `provinceCode`. `country` is `countryCode`. `billingAddress` is accepted and is not written to the cart or the SQLite file.
+
+When `shippingOptionId` matches a delivery option handle, the connector selects that option. Missing delivery groups, or a handle that does not match, is not an error. A missing `shippingOptionId` skips delivery selection. The response still includes `checkoutUrl` when Shopify returns an HTTPS URL. That URL is read in its own selection and is not added to cart-route responses. A missing or non-HTTPS URL is **500** `INTERNAL_ERROR` and no session is stored.
+
+A **200** body has `sessionToken`, `verificationToken` (random UUIDs), `expiresAt` (one hour), the cart snapshot, `checkoutUrl`, and `checkoutHandoff` `shopify_hosted`. The session row stores those tokens, `expiresAt`, and the encrypted checkout URL, tied to the cart UUID. The postal address is not copied. `Cache-Control` is `no-store`. Responses and logs omit `key=` and Shopify cart and line GIDs. Logs also omit `checkoutUrl`, session tokens, and payment fields.
+
+`POST /checkout/confirm` checks the schema, then idempotency, then the session: unknown token, expiry, then verification token. A valid session is **400** `PAYMENT_METHOD_UNSUPPORTED` (`https://fastbuyjson.org/problems/payment-method-unsupported`). `detail` tells the caller to open `checkoutUrl`, and the same URL is an extra problem field. Confirm does not charge, does not call `complete_checkout`, and does not store the idempotency key.
+
+`Idempotency-Key` on both routes uses the anonymous scope, the contract fingerprint, and 24-hour retention. **4xx** and **5xx** do not store the key. `app/uninstalled` and `shop/redact` delete the session with the shop, the cart, and idempotency rows.
+
 ## Still deferred
 
-- Discounts
-- Checkout URL (`POST /checkout/initiate`) and payment refusal (`POST /checkout/confirm`)
-- Shipping options
+- Shipping options (`GET /shipping/options`)
 - Order status
 
 ## Run

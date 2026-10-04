@@ -6,7 +6,11 @@ export type ProblemCode =
   | "CART_NOT_FOUND"
   | "CART_ITEM_NOT_FOUND"
   | "IDEMPOTENCY_KEY_CONFLICT"
-  | "INVALID_DISCOUNT_CODE";
+  | "INVALID_DISCOUNT_CODE"
+  | "INVALID_CHECKOUT_SESSION"
+  | "CHECKOUT_SESSION_EXPIRED"
+  | "INVALID_VERIFICATION_TOKEN"
+  | "PAYMENT_METHOD_UNSUPPORTED";
 
 export type FieldError = {
   field: string;
@@ -20,6 +24,8 @@ export type Problem = {
   code: ProblemCode;
   detail?: string;
   errors?: FieldError[];
+  /** Present only on PAYMENT_METHOD_UNSUPPORTED. schemas/error.json allows extra fields. */
+  checkoutUrl?: string;
 };
 
 export const REINSTALL_DETAIL = "The shop must be reinstalled.";
@@ -97,6 +103,47 @@ export function invalidDiscountCode(): Problem {
     status: 422,
     code: "INVALID_DISCOUNT_CODE",
     detail: "The discount code does not apply to this cart.",
+  };
+}
+
+export function invalidCheckoutSession(): Problem {
+  return {
+    type: "https://fastbuyjson.org/problems/invalid-checkout-session",
+    title: "Invalid checkout session",
+    status: 400,
+    code: "INVALID_CHECKOUT_SESSION",
+    detail: "Checkout session is missing or does not match",
+  };
+}
+
+export function checkoutSessionExpired(): Problem {
+  return {
+    type: "https://fastbuyjson.org/problems/checkout-session-expired",
+    title: "Checkout session expired",
+    status: 400,
+    code: "CHECKOUT_SESSION_EXPIRED",
+    detail: "Start a new checkout session",
+  };
+}
+
+export function invalidVerificationToken(): Problem {
+  return {
+    type: "https://fastbuyjson.org/problems/invalid-verification-token",
+    title: "Invalid verification token",
+    status: 400,
+    code: "INVALID_VERIFICATION_TOKEN",
+    detail: "The verification token does not match the checkout session",
+  };
+}
+
+export function paymentMethodUnsupported(checkoutUrl: string): Problem {
+  return {
+    type: "https://fastbuyjson.org/problems/payment-method-unsupported",
+    title: "Payment method unsupported",
+    status: 400,
+    code: "PAYMENT_METHOD_UNSUPPORTED",
+    detail: "Open checkoutUrl to pay on Shopify hosted checkout.",
+    checkoutUrl,
   };
 }
 
