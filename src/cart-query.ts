@@ -79,6 +79,19 @@ mutation CartLinesRemove($cartId: ID!, $lineIds: [ID!]!) {
   }
 }`;
 
+/** Replaces the cart's entire discount code list. Sends [] to clear. */
+export const CART_DISCOUNT_CODES_UPDATE_DOCUMENT = `
+${CART_FIELDS}
+mutation CartDiscountCodesUpdate($cartId: ID!, $discountCodes: [String!]!) {
+  cartDiscountCodesUpdate(cartId: $cartId, discountCodes: $discountCodes) {
+    cart {
+      ...CartFields
+      discountCodes { code applicable }
+    }
+    userErrors { field message code }
+  }
+}`;
+
 export const CART_QUERY_DOCUMENT = `
 ${CART_FIELDS}
 query CartFetch($id: ID!) {

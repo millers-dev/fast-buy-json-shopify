@@ -5,7 +5,8 @@ export type ProblemCode =
   | "PRODUCT_NOT_FOUND"
   | "CART_NOT_FOUND"
   | "CART_ITEM_NOT_FOUND"
-  | "IDEMPOTENCY_KEY_CONFLICT";
+  | "IDEMPOTENCY_KEY_CONFLICT"
+  | "INVALID_DISCOUNT_CODE";
 
 export type FieldError = {
   field: string;
@@ -86,6 +87,16 @@ export function cartItemNotFound(itemId: string): Problem {
     status: 404,
     code: "CART_ITEM_NOT_FOUND",
     detail: detailWithoutCartKey(itemId, `No cart item with id ${itemId}`, "No cart item matches that id."),
+  };
+}
+
+export function invalidDiscountCode(): Problem {
+  return {
+    type: "https://fastbuyjson.org/problems/invalid-discount-code",
+    title: "Invalid discount code",
+    status: 422,
+    code: "INVALID_DISCOUNT_CODE",
+    detail: "The discount code does not apply to this cart.",
   };
 }
 

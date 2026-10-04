@@ -12,6 +12,7 @@ import addFormatsModule from "ajv-formats";
 import { SHOPIFY_API_VERSION } from "../src/api-version.js";
 import {
   CART_CREATE_DOCUMENT,
+  CART_DISCOUNT_CODES_UPDATE_DOCUMENT,
   CART_LINES_ADD_DOCUMENT,
   CART_LINES_REMOVE_DOCUMENT,
   CART_LINES_UPDATE_DOCUMENT,
@@ -90,7 +91,20 @@ type CartBody = {
   cart: {
     id: string;
     items: CartItem[];
-    totals: { currency: string; subtotal: number; discount: number; total: number; tax?: number };
+    appliedDiscounts?: {
+      code?: string;
+      label?: string;
+      type?: string;
+      amount: { amount: number; currency: string };
+    }[];
+    totals: {
+      currency: string;
+      subtotal: number;
+      discount: number;
+      total: number;
+      tax?: number;
+      discountBreakdown?: { amount: number; code?: string; label?: string }[];
+    };
     created: string;
     updated: string;
     extensions?: Record<string, unknown>;
@@ -116,10 +130,14 @@ describe("cart documents and idempotency fingerprint", () => {
       CART_LINES_UPDATE_DOCUMENT,
       CART_LINES_REMOVE_DOCUMENT,
       CART_QUERY_DOCUMENT,
+      CART_DISCOUNT_CODES_UPDATE_DOCUMENT,
     ]) {
       assert.equal(document.includes("checkoutUrl"), false);
       assert.equal(document.includes("storefrontAccessTokenCreate"), false);
     }
+    assert.equal(CART_DISCOUNT_CODES_UPDATE_DOCUMENT.includes("cartDiscountCodesUpdate"), true);
+    assert.equal(CART_DISCOUNT_CODES_UPDATE_DOCUMENT.includes("discountCodes"), true);
+    assert.equal(CART_DISCOUNT_CODES_UPDATE_DOCUMENT.includes("applicable"), true);
   });
 
   it("canonicalizes the cart add fingerprint", () => {
@@ -716,10 +734,195 @@ describe("anonymous Storefront cart", { concurrency: false }, () => {
     assert.equal(fetched.message, undefined);
   });
 
-  it("leaves discounts, checkout, shipping, and POST /cart unimplemented", async () => {
+  it("applies one code, replaces it with a second code, and ignores Idempotency-Key", async () => {
+    const key = "add-then-discount";
+    pushVariant(VARIANT_GID);
+    script.push(() => jsonResponse(200, loadFixture("cart-snapshot.json")));
+    const created = assertCart(
+      await request(base, "POST", "/api/fastbuyjson/cart/add", { productId: VARIANT_GID, quantity: 1 }, {
+        "Idempotency-Key": key,
+      }),
+    );
+    calls.length = 0;
+
+    const summer = snapshotCart();
+    summer.discountAllocations = [
+      codeAllocation("Save10", "2.00", "Summer sale"),
+      titledAllocation("Automatic markdown", "1.50"),
+      titledAllocation("Custom adjust", "0.50"),
+    ];
+    script.push(() => jsonResponse(200, discountResponse(summer, [{ code: "Save10", applicable: true }])));
+    const applied = assertCart(
+      await request(base, "POST", "/api/fastbuyjson/cart/discount", { code: "  Save10  " }, { "Idempotency-Key": key }),
+    );
+    assert.equal(applied.headers.get("idempotency-replayed"), null);
+    assert.equal(applied.headers.get("content-type"), "application/json; charset=utf-8");
+    assert.equal(applied.cart.id, created.cart.id);
+    assert.equal(applied.message, undefined);
+    assert.equal(applied.cart.totals.discount, 4);
+    assert.deepEqual(applied.cart.appliedDiscounts, [
+      { code: "Save10", label: "Summer sale", amount: { amount: 2, currency: "USD" } },
+    ]);
+    assert.equal(applied.cart.appliedDiscounts?.[0] !== undefined && "type" in applied.cart.appliedDiscounts[0], false);
+    assert.deepEqual(applied.cart.totals.discountBreakdown, [
+      { amount: 2, code: "Save10", label: "Summer sale" },
+      { amount: 1.5, label: "Automatic markdown" },
+      { amount: 0.5, label: "Custom adjust" },
+    ]);
+    const update = graphqlCall(calls, 0);
+    expectStorefront(update);
+    assert.equal(update.query.includes("cartDiscountCodesUpdate"), true);
+    assert.deepEqual(update.variables, { cartId: SHOPIFY_CART_ID, discountCodes: ["Save10"] });
+
+    const welcome = snapshotCart();
+    welcome.discountAllocations = [codeAllocation("Welcome5", "5.00")];
+    script.push(() => jsonResponse(200, discountResponse(welcome, [{ code: "Welcome5", applicable: true }])));
+    const replaced = assertCart(
+      await request(base, "POST", "/api/fastbuyjson/cart/discount", { code: "Welcome5" }, { "Idempotency-Key": key }),
+    );
+    assert.equal(replaced.headers.get("idempotency-replayed"), null);
+    assert.equal(replaced.cart.id, created.cart.id);
+    assert.equal(replaced.cart.totals.discount, 5);
+    assert.deepEqual(replaced.cart.appliedDiscounts, [
+      { code: "Welcome5", label: "Welcome5", amount: { amount: 5, currency: "USD" } },
+    ]);
+    assert.deepEqual(graphqlCall(calls, 1).variables, { cartId: SHOPIFY_CART_ID, discountCodes: ["Welcome5"] });
+    const addFingerprint = computeIdempotencyFingerprint("POST", CART_ADD_ROUTE, {
+      productId: VARIANT_GID,
+      quantity: 1,
+    });
+    assert.equal(tokens.lookupIdempotency("anonymous", key, addFingerprint, now).kind, "replay");
+
+    calls.length = 0;
+    const replay = assertCart(
+      await request(base, "POST", "/api/fastbuyjson/cart/add", { productId: VARIANT_GID, quantity: 1 }, {
+        "Idempotency-Key": key,
+      }),
+    );
+    assert.equal(replay.headers.get("idempotency-replayed"), "true");
+    assert.equal(calls.length, 0);
+    assert.equal(logs.join("\n").includes("key="), false);
+    assert.equal(logs.join("\n").includes(LINE_GID), false);
+  });
+
+  it("clears discount codes for null, an empty body, an empty string, and whitespace", async () => {
+    const created = await addDefault();
+    calls.length = 0;
+    const bodies: unknown[] = [undefined, {}, { code: null }, { code: "" }, { code: " \n\t " }, "   "];
+    for (const body of bodies) {
+      script.push(() => jsonResponse(200, discountResponse(snapshotCart(), [])));
+      const cleared = assertCart(await request(base, "POST", "/api/fastbuyjson/cart/discount", body));
+      assert.equal(cleared.cart.id, created.cart.id);
+      assert.equal(cleared.cart.totals.discount, 0);
+      assert.equal(cleared.cart.appliedDiscounts, undefined);
+    }
+    assert.equal(calls.length, bodies.length);
+    for (let index = 0; index < bodies.length; index += 1) {
+      const call = graphqlCall(calls, index);
+      expectStorefront(call);
+      assert.deepEqual(call.variables, { cartId: SHOPIFY_CART_ID, discountCodes: [] });
+    }
+  });
+
+  it("returns 422 and removes a code Shopify marks inapplicable", async () => {
+    const created = await addDefault();
+    calls.length = 0;
+    script.push(() => jsonResponse(200, discountResponse(snapshotCart(), [{ code: "NOPE", applicable: false }])));
+    script.push(() => jsonResponse(200, discountResponse(snapshotCart(), [])));
+    const response = await request(base, "POST", "/api/fastbuyjson/cart/discount", { code: "NOPE" });
+    assertProblem(response, 422, "INVALID_DISCOUNT_CODE");
+    assert.equal(response.headers.get("content-type"), "application/problem+json; charset=utf-8");
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    const problem = response.json as { type?: string; cart?: unknown };
+    assert.equal(problem.type, "https://fastbuyjson.org/problems/invalid-discount-code");
+    assert.equal(problem.cart, undefined);
+    assert.equal(calls.length, 2);
+    assert.deepEqual(graphqlCall(calls, 0).variables, { cartId: SHOPIFY_CART_ID, discountCodes: ["NOPE"] });
+    assert.deepEqual(graphqlCall(calls, 1).variables, { cartId: SHOPIFY_CART_ID, discountCodes: [] });
+    assert.equal(tokens.getAnonymousCart(SHOP)?.cartId, created.cart.id);
+    assert.equal(logs.join("\n").includes(SHOPIFY_CART_ID), false);
+  });
+
+  it("returns 500 when the follow-up that removes an inapplicable code fails", async () => {
+    await addDefault();
+    calls.length = 0;
+    sleepDelays.length = 0;
+    script.push(() => jsonResponse(200, discountResponse(snapshotCart(), [{ code: "NOPE", applicable: false }])));
+    script.push(() => jsonResponse(200, loadFixture("throttled.json")));
+    script.push(() => jsonResponse(200, loadFixture("throttled.json")));
+    const throttled = await request(base, "POST", "/api/fastbuyjson/cart/discount", { code: "NOPE" });
+    assertProblem(throttled, 500, "INTERNAL_ERROR");
+    assert.equal((throttled.json as { cart?: unknown }).cart, undefined);
+    assert.deepEqual(sleepDelays, [SHOPIFY_BACKOFF_MS]);
+    assert.equal(calls.length, 3);
+    assert.deepEqual(graphqlCall(calls, 1).variables, { cartId: SHOPIFY_CART_ID, discountCodes: [] });
+
+    calls.length = 0;
+    script.push(() => jsonResponse(200, discountResponse(snapshotCart(), [{ code: "NOPE", applicable: false }])));
+    script.push(() =>
+      jsonResponse(200, {
+        data: {
+          cartDiscountCodesUpdate: {
+            userErrors: [{ field: ["discountCodes"], message: "Could not remove", code: "INVALID" }],
+          },
+        },
+      }),
+    );
+    const rejected = await request(base, "POST", "/api/fastbuyjson/cart/discount", { code: "NOPE" });
+    assertProblem(rejected, 500, "INTERNAL_ERROR");
+    assert.notEqual(rejected.status, 422);
+    assert.equal(calls.length, 2);
+  });
+
+  it("maps discount userErrors to 400 and throttling to 429", async () => {
+    await addDefault();
+    calls.length = 0;
+    script.push(() =>
+      jsonResponse(200, {
+        data: {
+          cartDiscountCodesUpdate: {
+            cart: null,
+            userErrors: [{ field: ["discountCodes", "0"], message: "Code is invalid", code: "INVALID" }],
+          },
+        },
+      }),
+    );
+    const rejected = await request(base, "POST", "/api/fastbuyjson/cart/discount", { code: "NOPE" });
+    assertProblem(rejected, 400, "VALIDATION_ERROR");
+    assert.notEqual(rejected.status, 422);
+    assert.equal((rejected.json as ProblemBody).detail, "Code is invalid");
+    assert.equal(calls.length, 1);
+
+    calls.length = 0;
+    sleepDelays.length = 0;
+    script.push(() => jsonResponse(200, loadFixture("throttled.json")));
+    script.push(() => jsonResponse(200, loadFixture("throttled.json")));
+    const limited = await request(base, "POST", "/api/fastbuyjson/cart/discount", { code: "Save10" }, {
+      "Idempotency-Key": "discount-throttle",
+    });
+    assertProblem(limited, 429, "RATE_LIMITED");
+    assert.equal((limited.json as ProblemBody).detail, "Shopify throttled the cart request.");
+    assert.deepEqual(sleepDelays, [SHOPIFY_BACKOFF_MS]);
+    assert.equal(limited.headers.get("idempotency-replayed"), null);
+  });
+
+  it("returns CART_NOT_FOUND and 400 without calling Shopify when the discount cannot run", async () => {
+    const missing = await request(base, "POST", "/api/fastbuyjson/cart/discount", { code: "Save10" });
+    assertProblem(missing, 404, "CART_NOT_FOUND");
+    assert.equal((missing.json as ProblemBody).detail, "No cart exists for the current identity");
+    const notJson = await request(base, "POST", "/api/fastbuyjson/cart/discount", "not-json");
+    assertProblem(notJson, 400, "VALIDATION_ERROR");
+    const wrongType = await request(base, "POST", "/api/fastbuyjson/cart/discount", { code: 1 });
+    assertProblem(wrongType, 400, "VALIDATION_ERROR");
+    const method = await request(base, "GET", "/api/fastbuyjson/cart/discount");
+    assert.equal(method.status, 405);
+    assert.equal(method.headers.get("allow"), "POST");
+    assert.equal(calls.length, 0);
+  });
+
+  it("leaves checkout, shipping, and POST /cart unimplemented", async () => {
     for (const path of [
       "/api/fastbuyjson/cart",
-      "/api/fastbuyjson/cart/discount",
       "/api/fastbuyjson/checkout/initiate",
       "/api/fastbuyjson/checkout/confirm",
     ]) {
@@ -820,6 +1023,32 @@ function lineNode(id: string, variantId: string, title: string, optionName: stri
       totalAmount: { amount: "19.99", currencyCode: "USD" },
     },
   };
+}
+
+function codeAllocation(code: string, amount: string, title?: string): Record<string, unknown> {
+  const allocation: Record<string, unknown> = {
+    discountedAmount: { amount, currencyCode: "USD" },
+    code,
+  };
+  if (title !== undefined) {
+    allocation.title = title;
+  }
+  return allocation;
+}
+
+function titledAllocation(title: string, amount: string): Record<string, unknown> {
+  return {
+    discountedAmount: { amount, currencyCode: "USD" },
+    title,
+  };
+}
+
+function discountResponse(
+  cart: ShopifyCart,
+  discountCodes: { code: string; applicable: boolean }[],
+  userErrors: unknown[] = [],
+): unknown {
+  return { data: { cartDiscountCodesUpdate: { cart: { ...cart, discountCodes }, userErrors } } };
 }
 
 function mutationResponse(operation: string, cart: ShopifyCart, userErrors: unknown[] = []): unknown {
