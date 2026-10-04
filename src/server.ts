@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 
+import { handleCart, matchCartRequest } from "./cart.js";
 import { prepareCommerceAccess } from "./commerce-token.js";
 import type { ConnectorConfig } from "./config.js";
 import type { ConnectorDeps } from "./deps.js";
@@ -76,6 +77,22 @@ async function route(
       "Cache-Control": DETECT_CACHE_CONTROL,
     });
     res.end(detectBody);
+    return;
+  }
+
+  const cartRoute = matchCartRequest(req.method ?? "GET", pathname);
+  if (cartRoute.match !== "ignore") {
+    if (cartRoute.match === "not-allowed") {
+      req.resume();
+      writeJson(res, 405, { error: "method_not_allowed" }, { Allow: cartRoute.allow, "Cache-Control": "no-store" });
+      return;
+    }
+    if (deps === undefined) {
+      req.resume();
+      writeJson(res, 404, { error: "not_found" }, { "Cache-Control": "no-store" });
+      return;
+    }
+    await handleCart(req, res, deps, cartRoute.match);
     return;
   }
 

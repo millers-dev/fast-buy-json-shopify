@@ -1,0 +1,17 @@
+{
+  "data": {
+    "cartCreate": {
+      "cart": {
+        "id": "gid://shopify/Cart/c1?key=super-secret-cart-key",
+        "checkoutUrl": "https://example.myshopify.com/cart/c/c1?key=super-secret-cart-key"
+      },
+      "userErrors": [
+        {
+          "field": ["lines", "0", "quantity"],
+          "message": "The product is out of stock",
+          "code": "INVALID"
+        }
+      ]
+    }
+  }
+}
