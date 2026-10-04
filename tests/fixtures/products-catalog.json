@@ -1,0 +1,59 @@
+{
+  "data": {
+    "products": {
+      "pageInfo": { "hasNextPage": false, "endCursor": "cursor-end" },
+      "nodes": [
+        {
+          "id": "gid://shopify/Product/5001",
+          "title": "Filter Hat",
+          "vendor": "aCmE",
+          "descriptionHtml": "<p>Filter</p>",
+          "productType": "Headphones",
+          "tags": ["Audio"],
+          "availableForSale": true,
+          "priceRange": { "minVariantPrice": { "amount": "10.00", "currencyCode": "USD" } },
+          "images": { "nodes": [] },
+          "collections": { "nodes": [{ "title": "Summer Drop" }] },
+          "variants": {
+            "pageInfo": { "hasNextPage": false, "endCursor": null },
+            "nodes": [
+              {
+                "id": "gid://shopify/ProductVariant/5001",
+                "availableForSale": true,
+                "currentlyNotInStock": false,
+                "quantityAvailable": 3,
+                "selectedOptions": [{ "name": "Color", "value": "Black" }],
+                "price": { "amount": "10.00", "currencyCode": "USD" }
+              }
+            ]
+          }
+        },
+        {
+          "id": "gid://shopify/Product/5002",
+          "title": "Filter Second",
+          "vendor": "aCmE",
+          "descriptionHtml": "<p>Second filter</p>",
+          "productType": "Headphones",
+          "tags": [],
+          "availableForSale": true,
+          "priceRange": { "minVariantPrice": { "amount": "19.99", "currencyCode": "USD" } },
+          "images": { "nodes": [] },
+          "collections": { "nodes": [] },
+          "variants": {
+            "pageInfo": { "hasNextPage": false, "endCursor": null },
+            "nodes": [
+              {
+                "id": "gid://shopify/ProductVariant/5002",
+                "availableForSale": true,
+                "currentlyNotInStock": false,
+                "quantityAvailable": 1,
+                "selectedOptions": [{ "name": "Color", "value": "White" }],
+                "price": { "amount": "19.99", "currencyCode": "USD" }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

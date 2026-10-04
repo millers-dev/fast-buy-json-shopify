@@ -4,7 +4,7 @@ This repository is the Shopify store connector for [FastBuyJSON](https://github.
 
 FastBuyJSON itself — the contract, the Node and Python reference servers, the TypeScript SDK, and the stdio MCP server — stays in `millers-dev/fast-buy-json`. Point that MCP server at this process with `FASTBUYJSON_API_URL=http://localhost:3100/api/fastbuyjson`. This package is not part of that repository and it is not published to npm.
 
-It is early. The accepted plan is `docs/SHOPIFY_PLAN.md` in `millers-dev/fast-buy-json`. This tree implements discovery plus Shopify app OAuth and token storage.
+It is early. The accepted plan is `docs/SHOPIFY_PLAN.md` in `millers-dev/fast-buy-json`. This tree implements discovery, one-shop OAuth, and catalog search.
 
 ## What v1 does
 
@@ -51,18 +51,32 @@ The Admin access token and refresh token are encrypted with `TOKEN_ENCRYPTION_KE
 
 `app/uninstalled` and `shop/redact` are HMAC-checked and delete that shop row. `customers/data_request` and `customers/redact` are HMAC-checked, acknowledged, and do not build a customer archive. Point them at `{APP_URL}/api/shopify/webhooks/<topic>` (slashes in the topic become path segments) or at `{APP_URL}/api/shopify/webhooks` and let `X-Shopify-Topic` select the handler.
 
-When a stored token must be refreshed before a commerce call and the refresh fails, the cached access token is cleared and the call returns **500** `INTERNAL_ERROR`. The body says the shop must be reinstalled and does not contain a token. Catalog, cart, discounts, checkout URL, and shipping are not implemented, so those routes stay **404** while the stored token is usable.
+When a stored token must be refreshed before a commerce call and the refresh fails, the cached access token is cleared and the call returns **500** `INTERNAL_ERROR`. The body says the shop must be reinstalled and does not contain a token. Cart, discounts, checkout URL, and shipping are not implemented, so those routes stay **404** while the stored token is usable.
+
+## Catalog
+
+`POST /api/fastbuyjson/products/search` reads the Storefront API at the pinned version in `src/api-version.ts`. A text `query` uses Storefront `search`. A filters-only request uses `products`. Pagination stays the contract's `page` / `pageSize` (1-based, `pageSize` at most 100). The connector returns **400** `VALIDATION_ERROR` when `page * pageSize` would scan more than 1000 matching items to reach that page.
+
+`totalItems` is the number of products that match the request. A text query with no availability, price, or category filter uses `search.totalCount`. `products` has no `totalCount`. A filters-only request whose filters are already in the products query walks cursors until `pageInfo.hasNextPage` is false and uses that product count. It does not add one when another page exists, and a shop with more than 1000 products does not return **400** on page 1.
+
+Availability, `priceRange` (inclusive minimum variant price), and categories on a text query (`productType` or tag) are applied while cursors are walked. The page is filled with up to `pageSize` matching products. `totalItems` is the size of that matching set after the walk ends. A filtered page 1 with more than 1000 matches returns **200** and that real count. The count does not stop at 1000.
+
+`filters.availability` keeps a product only when its mapped status is in the requested set. `in_stock` and `backorder` are not both `available: true`. A categories filter matches `product_type` or tag and is not appended to the caller search text. `availability.quantity` sums `quantityAvailable` across variant pages and is omitted when any variant quantity is null.
+
+The first catalog call mints a delegate token with `delegateAccessTokenCreate`, limited to the four unauthenticated scopes above, and stores it encrypted in the same SQLite file. Storefront requests send that token as `Shopify-Storefront-Private-Token`. A public Storefront token is not minted, and the delegate token is not returned to the agent. Saving a new Admin token clears the delegate; the next catalog call mints another.
+
+When the FastBuyJSON request's TCP peer is a public address, it is forwarded as `Shopify-Storefront-Buyer-IP`. A loopback peer omits that header. `127.0.0.1` is not sent.
+
+A `priceRange.currency` other than the shop currency is **400** `VALIDATION_ERROR`. Prices are not converted. Shopify **429**, or a Storefront `THROTTLED` error, waits one second, retries that call once, and then returns **429** `RATE_LIMITED`.
 
 `schemas/` is an unmodified copy of FastBuyJSON `schemas/` at tag `1.0.0`. The Shopify API pin `2026-10` lives in `src/api-version.ts`.
 
 ## Still deferred
 
-- Catalog mapping
 - Cart, including the opaque cart id
 - Discounts
 - Checkout URL (`POST /checkout/initiate`) and payment refusal (`POST /checkout/confirm`)
 - Shipping options
-- Delegate Storefront token (`delegateAccessTokenCreate`), minted on the first catalog or cart call
 - Order status
 
 ## Run

@@ -1,0 +1,9 @@
+{
+  "data": {
+    "shop": {
+      "paymentSettings": {
+        "currencyCode": "USD"
+      }
+    }
+  }
+}

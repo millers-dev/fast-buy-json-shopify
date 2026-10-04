@@ -1,0 +1,34 @@
+{
+  "data": {
+    "products": {
+      "pageInfo": { "hasNextPage": false, "endCursor": null },
+      "nodes": [
+        {
+          "id": "gid://shopify/Product/4002",
+          "title": "Cursor Second",
+          "vendor": "Acme",
+          "descriptionHtml": "<p>Second</p>",
+          "productType": "Hats",
+          "tags": [],
+          "availableForSale": false,
+          "priceRange": { "minVariantPrice": { "amount": "19.99", "currencyCode": "USD" } },
+          "images": { "nodes": [] },
+          "collections": { "nodes": [] },
+          "variants": {
+            "pageInfo": { "hasNextPage": false, "endCursor": null },
+            "nodes": [
+              {
+                "id": "gid://shopify/ProductVariant/4002",
+                "availableForSale": false,
+                "currentlyNotInStock": false,
+                "quantityAvailable": null,
+                "selectedOptions": [{ "name": "Color", "value": "Blue" }],
+                "price": { "amount": "19.99", "currencyCode": "USD" }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

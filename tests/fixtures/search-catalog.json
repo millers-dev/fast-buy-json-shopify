@@ -1,0 +1,104 @@
+{
+  "data": {
+    "search": {
+      "totalCount": 3,
+      "pageInfo": { "hasNextPage": false, "endCursor": "cursor-search" },
+      "nodes": [
+        {
+          "id": "gid://shopify/Product/1001",
+          "title": "ACME Wireless Headphones Pro",
+          "vendor": "Acme",
+          "descriptionHtml": "<p>Premium <b>wireless</b> &amp; noise cancelling</p>",
+          "productType": "Headphones",
+          "tags": ["Audio", "Wireless"],
+          "availableForSale": true,
+          "priceRange": { "minVariantPrice": { "amount": "10.00", "currencyCode": "USD" } },
+          "images": {
+            "nodes": [
+              { "url": "https://cdn.shopify.com/headphones-front.jpg", "altText": "Front" },
+              { "url": "https://cdn.shopify.com/headphones-side.jpg", "altText": null }
+            ]
+          },
+          "collections": { "nodes": [{ "title": "Summer Drop" }] },
+          "variants": {
+            "pageInfo": { "hasNextPage": false, "endCursor": null },
+            "nodes": [
+              {
+                "id": "gid://shopify/ProductVariant/2001",
+                "availableForSale": true,
+                "currentlyNotInStock": false,
+                "quantityAvailable": 4,
+                "selectedOptions": [
+                  { "name": "Color", "value": "Black" },
+                  { "name": "Size", "value": "Large" }
+                ],
+                "price": { "amount": "19.99", "currencyCode": "USD" }
+              },
+              {
+                "id": "gid://shopify/ProductVariant/2002",
+                "availableForSale": true,
+                "currentlyNotInStock": false,
+                "quantityAvailable": 1,
+                "selectedOptions": [
+                  { "name": "Color", "value": "White" },
+                  { "name": "Size", "value": "Large" }
+                ],
+                "price": { "amount": "10.00", "currencyCode": "USD" }
+              }
+            ]
+          }
+        },
+        {
+          "id": "gid://shopify/Product/1002",
+          "title": "ACME Sold Out",
+          "vendor": "Acme",
+          "descriptionHtml": "<p>Sold <i>out</i></p>",
+          "productType": "Headphones",
+          "tags": [],
+          "availableForSale": false,
+          "priceRange": { "minVariantPrice": { "amount": "19.99", "currencyCode": "USD" } },
+          "images": { "nodes": [] },
+          "collections": { "nodes": [] },
+          "variants": {
+            "pageInfo": { "hasNextPage": false, "endCursor": null },
+            "nodes": [
+              {
+                "id": "gid://shopify/ProductVariant/2003",
+                "availableForSale": false,
+                "currentlyNotInStock": false,
+                "quantityAvailable": null,
+                "selectedOptions": [{ "name": "Color", "value": "Black" }],
+                "price": { "amount": "19.99", "currencyCode": "USD" }
+              }
+            ]
+          }
+        },
+        {
+          "id": "gid://shopify/Product/1003",
+          "title": "ACME Backorder",
+          "vendor": "Acme",
+          "descriptionHtml": "<p>Ships later</p>",
+          "productType": "Headphones",
+          "tags": [],
+          "availableForSale": true,
+          "priceRange": { "minVariantPrice": { "amount": "5.00", "currencyCode": "USD" } },
+          "images": { "nodes": [] },
+          "collections": { "nodes": [] },
+          "variants": {
+            "pageInfo": { "hasNextPage": false, "endCursor": null },
+            "nodes": [
+              {
+                "id": "gid://shopify/ProductVariant/2004",
+                "availableForSale": true,
+                "currentlyNotInStock": true,
+                "quantityAvailable": 0,
+                "selectedOptions": [{ "name": "Color", "value": "Gray" }],
+                "price": { "amount": "5.00", "currencyCode": "USD" }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}
