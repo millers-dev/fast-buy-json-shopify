@@ -86,8 +86,10 @@ describe("Storefront API 2026-10 catalog decisions", () => {
     assert.match(FILTERS_ONLY_TOTAL_ITEMS, /does not return 400 on page 1/);
     assert.match(MATCHING_PAGE_TOTAL, /up to pageSize/);
     assert.match(MATCHING_PAGE_TOTAL, /not search\.totalCount/);
-    assert.match(MATCHING_PAGE_TOTAL, /does not count past 1000 matching items/);
+    assert.match(MATCHING_PAGE_TOTAL, /does not stop the count at 1000/);
     assert.match(MATCHING_PAGE_TOTAL, /does not invent a count/);
+    assert.match(MATCHING_PAGE_TOTAL, /returns 200 and that real matching count/);
+    assert.match(MATCHING_PAGE_TOTAL, /page \* pageSize/);
     assert.match(AVAILABILITY_FILTER_ON_2026_10, /subset of the mapped availability.status/);
     assert.match(CATEGORIES_FILTER_ON_2026_10, /not appended to the caller search query/);
     assert.match(PRICE_RANGE_ON_2026_10, /minimum variant price/);
@@ -740,7 +742,7 @@ describe("POST /api/fastbuyjson/products/search", () => {
     assert.equal(nextBody.pagination.currentPage, 2);
   });
 
-  it("counts a filters-only catalog past 1000 and rejects a matching walk past that cap", async () => {
+  it("counts filtered and unfiltered catalogs past 1000 on page 1", async () => {
     const node = catalogNode("bulk", "in_stock");
     const counts = [250, 250, 250, 250, 1];
     script.push(() => jsonResponse(200, loadFixture("delegate-token.json")));
@@ -785,9 +787,13 @@ describe("POST /api/fastbuyjson/products/search", () => {
       );
     }
     const priced = await postSearch(base, { pageSize: 10, filters: { priceRange: { min: 10, max: 20, currency: "USD" } } });
-    assert.equal(priced.status, 400);
-    assert.equal((priced.json as { code?: string }).code, "VALIDATION_ERROR");
-    assert.equal(validateProblem(priced.json), true);
+    assert.equal(priced.status, 200);
+    assert.equal(validateSearchResponse(priced.json), true);
+    const pricedBody = priced.json as SearchBody;
+    assert.equal(pricedBody.results.length, 10);
+    assert.equal(pricedBody.pagination.totalItems, 1001);
+    assert.equal(pricedBody.pagination.totalPages, 101);
+    assert.equal(pricedBody.pagination.currentPage, 1);
     assert.equal(calls.filter((call) => call.body.includes("CatalogProducts")).length, counts.length);
   });
 

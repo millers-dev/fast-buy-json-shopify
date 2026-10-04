@@ -61,7 +61,7 @@ type ParsedSearch = {
 
 type CallFailure = "throttled" | "unauthorized" | "failed";
 
-type WalkResult = { kind: "ok"; nodes: unknown[]; totalItems: number } | { kind: "scan" } | { kind: CallFailure };
+type WalkResult = { kind: "ok"; nodes: unknown[]; totalItems: number } | { kind: CallFailure };
 
 export async function handleProductSearch(
   req: IncomingMessage,
@@ -122,10 +122,6 @@ export async function handleProductSearch(
   }
 
   const walked = await walkCatalog(deps, delegate.token, buyerIp, request);
-  if (walked.kind === "scan") {
-    writeProblem(res, scanProblem());
-    return;
-  }
   if (walked.kind !== "ok") {
     await writeCallFailure(res, deps, walked.kind);
     return;
@@ -465,9 +461,6 @@ async function walkMatches(
       const product = mapCatalogProduct(node);
       if (product === null || !keepProduct(node, product, request, wanted)) {
         continue;
-      }
-      if (matchCount >= MAX_PRODUCT_SCAN) {
-        return { kind: "scan" };
       }
       if (matchCount >= offset && matchCount < end) {
         selected.push(node);

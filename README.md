@@ -59,7 +59,7 @@ When a stored token must be refreshed before a commerce call and the refresh fai
 
 `totalItems` is the number of products that match the request. A text query with no availability, price, or category filter uses `search.totalCount`. `products` has no `totalCount`. A filters-only request whose filters are already in the products query walks cursors until `pageInfo.hasNextPage` is false and uses that product count. It does not add one when another page exists, and a shop with more than 1000 products does not return **400** on page 1.
 
-Availability, `priceRange` (inclusive minimum variant price), and categories on a text query (`productType` or tag) are applied while cursors are walked. The page is filled with up to `pageSize` matching products. `totalItems` is the size of that matching set. The matching walk does not count past 1000 matches. If another match exists after that, the request is **400** `VALIDATION_ERROR`.
+Availability, `priceRange` (inclusive minimum variant price), and categories on a text query (`productType` or tag) are applied while cursors are walked. The page is filled with up to `pageSize` matching products. `totalItems` is the size of that matching set after the walk ends. A filtered page 1 with more than 1000 matches returns **200** and that real count. The count does not stop at 1000.
 
 `filters.availability` keeps a product only when its mapped status is in the requested set. `in_stock` and `backorder` are not both `available: true`. A categories filter matches `product_type` or tag and is not appended to the caller search text. `availability.quantity` sums `quantityAvailable` across variant pages and is omitted when any variant quantity is null.
 
