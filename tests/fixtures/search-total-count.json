@@ -1,0 +1,42 @@
+{
+  "data": {
+    "search": {
+      "totalCount": 40,
+      "pageInfo": {
+        "hasNextPage": true,
+        "endCursor": "cursor-more"
+      },
+      "nodes": [
+        {
+          "id": "gid://shopify/Product/3001",
+          "title": "Counted Hat",
+          "vendor": "Acme",
+          "descriptionHtml": "<p>Counted</p>",
+          "productType": "Hats",
+          "tags": [],
+          "availableForSale": true,
+          "priceRange": {
+            "minVariantPrice": {
+              "amount": "10.00",
+              "currencyCode": "USD"
+            }
+          },
+          "images": { "nodes": [] },
+          "collections": { "nodes": [] },
+          "variants": {
+            "nodes": [
+              {
+                "id": "gid://shopify/ProductVariant/3001",
+                "availableForSale": true,
+                "currentlyNotInStock": false,
+                "quantityAvailable": 2,
+                "selectedOptions": [{ "name": "Color", "value": "Red" }],
+                "price": { "amount": "10.00", "currencyCode": "USD" }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

@@ -341,7 +341,7 @@ describe("commerce token refresh", () => {
       },
       FIXED_NOW,
     );
-    const deferred = await send(harness.base, "/api/fastbuyjson/products/search", { method: "POST" });
+    const deferred = await send(harness.base, "/api/fastbuyjson/cart", { method: "POST" });
     assert.equal(deferred.status, 404);
     assert.equal(harness.calls.length, 1);
     });

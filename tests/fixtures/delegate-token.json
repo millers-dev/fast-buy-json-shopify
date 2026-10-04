@@ -1,0 +1,11 @@
+{
+  "data": {
+    "delegateAccessTokenCreate": {
+      "delegateAccessToken": {
+        "accessToken": "shppa_delegate_catalog_test",
+        "expiresIn": 3600
+      },
+      "userErrors": []
+    }
+  }
+}

@@ -13,6 +13,7 @@ import {
   isWebhookPath,
 } from "./http-auth.js";
 import { writeJson, writeProblem, writeUnexpected } from "./http-response.js";
+import { PRODUCTS_SEARCH_PATH, handleProductSearch } from "./product-search.js";
 import { internalError } from "./problems.js";
 
 export const DEFAULT_PORT = 3100;
@@ -75,6 +76,20 @@ async function route(
       "Cache-Control": DETECT_CACHE_CONTROL,
     });
     res.end(detectBody);
+    return;
+  }
+
+  if (pathname === PRODUCTS_SEARCH_PATH) {
+    if (req.method !== "POST") {
+      req.resume();
+      writeJson(res, 405, { error: "method_not_allowed" }, { Allow: "POST", "Cache-Control": "no-store" });
+      return;
+    }
+    if (deps === undefined) {
+      writeJson(res, 404, { error: "not_found" }, { "Cache-Control": "no-store" });
+      return;
+    }
+    await handleProductSearch(req, res, deps);
     return;
   }
 

@@ -15,4 +15,5 @@ export type ConnectorDeps = {
   oauthState: OauthStateStore;
   fetch: typeof fetch;
   now: () => number;
+  sleep?: (ms: number) => Promise<void>;
 };

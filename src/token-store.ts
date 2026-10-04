@@ -22,6 +22,11 @@ export type ShopTokenRecord = {
   refreshExpiresAt: number | null;
 };
 
+export type DelegateRecord = {
+  accessToken: string;
+  expiresAt: number | null;
+};
+
 export type ShopTokenWrite = {
   shopDomain: string;
   grantType: GrantType;
@@ -208,7 +213,55 @@ export class TokenStore {
     this.db.close();
   }
 
-  private readSecret(row: Record<string, SqlValue>, field: "access" | "refresh", aad: string): string | null {
+  getDelegate(): DelegateRecord | null {
+    const row = this.one(
+      `SELECT shop_domain, delegate_nonce, delegate_ciphertext, delegate_expires_at
+       FROM shop_credential WHERE singleton = 1`,
+    );
+    if (row === undefined) {
+      return null;
+    }
+    const shopDomain = readString(row, "shop_domain");
+    if (shopDomain === null) {
+      throw new TokenDecryptError();
+    }
+    const accessToken = this.readSecret(row, "delegate", `${shopDomain}\u0000delegate`);
+    if (accessToken === null) {
+      return null;
+    }
+    return {
+      accessToken,
+      expiresAt: readNullableInt(row, "delegate_expires_at"),
+    };
+  }
+
+  saveDelegate(shopDomain: string, accessToken: string, expiresAt: number | null, now: number): boolean {
+    const existing = this.one("SELECT shop_domain FROM shop_credential WHERE singleton = 1");
+    if (existing === undefined || readString(existing, "shop_domain") !== shopDomain) {
+      return false;
+    }
+    const delegate = encryptSecret(this.key, accessToken, `${shopDomain}\u0000delegate`);
+    this.db.run(
+      `UPDATE shop_credential
+       SET delegate_nonce = ?, delegate_ciphertext = ?, delegate_expires_at = ?, updated_at = ?
+       WHERE singleton = 1 AND shop_domain = ?`,
+      [new Uint8Array(delegate.nonce), new Uint8Array(delegate.ciphertext), expiresAt, now, shopDomain],
+    );
+    this.persist();
+    return true;
+  }
+
+  clearDelegate(shopDomain: string, now: number): void {
+    this.db.run(
+      `UPDATE shop_credential
+       SET delegate_nonce = NULL, delegate_ciphertext = NULL, delegate_expires_at = NULL, updated_at = ?
+       WHERE singleton = 1 AND shop_domain = ?`,
+      [now, shopDomain],
+    );
+    this.persist();
+  }
+
+  private readSecret(row: Record<string, SqlValue>, field: string, aad: string): string | null {
     const nonce = row[`${field}_nonce`];
     const ciphertext = row[`${field}_ciphertext`];
     if (nonce === null && ciphertext === null) {
