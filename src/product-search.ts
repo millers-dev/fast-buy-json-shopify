@@ -59,11 +59,9 @@ type ParsedSearch = {
   filters?: CatalogFilters;
 };
 
-type WalkResult =
-  | { kind: "ok"; nodes: unknown[]; totalItems: number }
-  | { kind: "throttled" }
-  | { kind: "unauthorized" }
-  | { kind: "failed" };
+type CallFailure = "throttled" | "unauthorized" | "failed";
+
+type WalkResult = { kind: "ok"; nodes: unknown[]; totalItems: number } | { kind: "scan" } | { kind: CallFailure };
 
 export async function handleProductSearch(
   req: IncomingMessage,
@@ -124,24 +122,21 @@ export async function handleProductSearch(
   }
 
   const walked = await walkCatalog(deps, delegate.token, buyerIp, request);
+  if (walked.kind === "scan") {
+    writeProblem(res, scanProblem());
+    return;
+  }
   if (walked.kind !== "ok") {
     await writeCallFailure(res, deps, walked.kind);
     return;
   }
-  const expanded = await expandVariantPages(deps, delegate.token, buyerIp, walked.nodes);
-  if (expanded.kind !== "ok") {
-    await writeCallFailure(res, deps, expanded.kind);
-    return;
-  }
 
-  const wanted = availabilityWanted(request.filters?.availability);
   const results: CatalogProduct[] = [];
-  for (const node of expanded.nodes) {
+  for (const node of walked.nodes) {
     const product = mapCatalogProduct(node);
-    if (product === null || !keepProduct(node, product, request, wanted)) {
-      continue;
+    if (product !== null) {
+      results.push(product);
     }
-    results.push(product);
   }
   writeJson(res, 200, pageBody(results, request.page, request.pageSize, walked.totalItems), NO_STORE);
 }
@@ -281,6 +276,20 @@ function readShopCurrency(data: unknown): string | null {
   return code.trim().toUpperCase();
 }
 
+function dropsRows(request: ParsedSearch, mode: "search" | "products"): boolean {
+  const wanted = availabilityWanted(request.filters?.availability);
+  if (wanted !== "all") {
+    return true;
+  }
+  if (request.filters?.priceRange !== undefined) {
+    return true;
+  }
+  if (mode === "search" && request.filters?.categories !== undefined && request.filters.categories.length > 0) {
+    return true;
+  }
+  return false;
+}
+
 async function walkCatalog(
   deps: ConnectorDeps,
   token: string,
@@ -306,63 +315,219 @@ async function walkCatalog(
   const document = mode === "search" ? SEARCH_DOCUMENT : PRODUCTS_DOCUMENT;
   const offset = (request.page - 1) * request.pageSize;
   const end = offset + request.pageSize;
+  if (dropsRows(request, mode)) {
+    return walkMatches(deps, token, buyerIp, mode, document, base, offset, end, request);
+  }
+  if (mode === "search") {
+    return walkSearchWindow(deps, token, buyerIp, document, base, offset, end);
+  }
+  return walkProductsCount(deps, token, buyerIp, document, base, offset, end);
+}
+
+async function walkSearchWindow(
+  deps: ConnectorDeps,
+  token: string,
+  buyerIp: string | undefined,
+  document: string,
+  base: Record<string, unknown>,
+  offset: number,
+  end: number,
+): Promise<WalkResult> {
   let scanned = 0;
   let after: string | null = null;
   let searchTotal: number | undefined;
-  let exhausted = false;
   const selected: unknown[] = [];
 
   while (scanned < end) {
-    if (mode === "search" && searchTotal !== undefined && (offset >= searchTotal || scanned >= end)) {
+    if (searchTotal !== undefined && (offset >= searchTotal || scanned >= end)) {
       break;
     }
     const first = Math.min(SHOPIFY_CONNECTION_PAGE, end - scanned);
-    const call = await storefront(deps, token, buyerIp, document, { ...base, first, after });
-    if (call.kind !== "ok") {
-      return { kind: call.kind };
+    const page = await fetchConnectionPage(deps, token, buyerIp, "search", document, base, first, after);
+    if (page.kind !== "ok") {
+      return page;
     }
-    const page = mode === "search" ? parseSearchPage(call.data) : parseProductsPage(call.data);
-    if (page === null) {
-      return { kind: "failed" };
-    }
-    if (mode === "search") {
-      if (page.totalCount === undefined) {
-        return { kind: "failed" };
-      }
-      searchTotal = page.totalCount;
-    }
-    for (let index = 0; index < page.nodes.length; index += 1) {
+    searchTotal = page.page.totalCount;
+    for (let index = 0; index < page.page.nodes.length; index += 1) {
       const absolute = scanned + index;
-      const node = page.nodes[index];
+      const node = page.page.nodes[index];
       if (node !== undefined && absolute >= offset && absolute < end) {
         selected.push(node);
       }
     }
-    scanned += page.nodes.length;
-    if (page.nodes.length === 0) {
-      if (page.hasNextPage) {
+    scanned += page.page.nodes.length;
+    if (page.page.nodes.length === 0) {
+      if (page.page.hasNextPage) {
         return { kind: "failed" };
       }
-      exhausted = true;
       break;
     }
-    if (!page.hasNextPage) {
-      exhausted = true;
+    if (!page.page.hasNextPage || scanned >= end) {
       break;
     }
-    if (scanned >= end) {
-      break;
-    }
-    after = page.endCursor;
+    after = page.page.endCursor;
   }
 
-  if (mode === "search") {
-    if (searchTotal === undefined) {
-      return { kind: "failed" };
-    }
-    return { kind: "ok", nodes: selected, totalItems: searchTotal };
+  if (searchTotal === undefined) {
+    return { kind: "failed" };
   }
-  return { kind: "ok", nodes: selected, totalItems: exhausted ? scanned : scanned + 1 };
+  return finishPage(deps, token, buyerIp, selected, searchTotal);
+}
+
+async function walkProductsCount(
+  deps: ConnectorDeps,
+  token: string,
+  buyerIp: string | undefined,
+  document: string,
+  base: Record<string, unknown>,
+  offset: number,
+  end: number,
+): Promise<WalkResult> {
+  let scanned = 0;
+  let after: string | null = null;
+  const selected: unknown[] = [];
+
+  for (;;) {
+    const page = await fetchConnectionPage(
+      deps,
+      token,
+      buyerIp,
+      "products",
+      document,
+      base,
+      SHOPIFY_CONNECTION_PAGE,
+      after,
+    );
+    if (page.kind !== "ok") {
+      return page;
+    }
+    for (const node of page.page.nodes) {
+      if (scanned >= offset && scanned < end) {
+        selected.push(node);
+      }
+      scanned += 1;
+    }
+    if (page.page.nodes.length === 0) {
+      if (page.page.hasNextPage) {
+        return { kind: "failed" };
+      }
+      break;
+    }
+    if (!page.page.hasNextPage) {
+      break;
+    }
+    after = page.page.endCursor;
+  }
+
+  return finishPage(deps, token, buyerIp, selected, scanned);
+}
+
+async function walkMatches(
+  deps: ConnectorDeps,
+  token: string,
+  buyerIp: string | undefined,
+  mode: "search" | "products",
+  document: string,
+  base: Record<string, unknown>,
+  offset: number,
+  end: number,
+  request: ParsedSearch,
+): Promise<WalkResult> {
+  const wanted = availabilityWanted(request.filters?.availability);
+  const expandForStatus = wanted !== "all" && wanted !== "empty";
+  let matchCount = 0;
+  let after: string | null = null;
+  const selected: unknown[] = [];
+
+  for (;;) {
+    const page = await fetchConnectionPage(
+      deps,
+      token,
+      buyerIp,
+      mode,
+      document,
+      base,
+      SHOPIFY_CONNECTION_PAGE,
+      after,
+    );
+    if (page.kind !== "ok") {
+      return page;
+    }
+    for (const raw of page.page.nodes) {
+      let node = raw;
+      if (expandForStatus) {
+        const completed = await expandOneProduct(deps, token, buyerIp, raw);
+        if (completed.kind !== "ok") {
+          return completed;
+        }
+        node = completed.node;
+      }
+      const product = mapCatalogProduct(node);
+      if (product === null || !keepProduct(node, product, request, wanted)) {
+        continue;
+      }
+      if (matchCount >= MAX_PRODUCT_SCAN) {
+        return { kind: "scan" };
+      }
+      if (matchCount >= offset && matchCount < end) {
+        selected.push(node);
+      }
+      matchCount += 1;
+    }
+    if (page.page.nodes.length === 0) {
+      if (page.page.hasNextPage) {
+        return { kind: "failed" };
+      }
+      break;
+    }
+    if (!page.page.hasNextPage) {
+      break;
+    }
+    after = page.page.endCursor;
+  }
+
+  if (expandForStatus) {
+    return { kind: "ok", nodes: selected, totalItems: matchCount };
+  }
+  return finishPage(deps, token, buyerIp, selected, matchCount);
+}
+
+async function finishPage(
+  deps: ConnectorDeps,
+  token: string,
+  buyerIp: string | undefined,
+  selected: unknown[],
+  totalItems: number,
+): Promise<WalkResult> {
+  const expanded = await expandVariantPages(deps, token, buyerIp, selected);
+  if (expanded.kind !== "ok") {
+    return expanded;
+  }
+  return { kind: "ok", nodes: expanded.nodes, totalItems };
+}
+
+async function fetchConnectionPage(
+  deps: ConnectorDeps,
+  token: string,
+  buyerIp: string | undefined,
+  mode: "search" | "products",
+  document: string,
+  base: Record<string, unknown>,
+  first: number,
+  after: string | null,
+): Promise<{ kind: "ok"; page: ConnectionPage } | { kind: CallFailure }> {
+  const call = await storefront(deps, token, buyerIp, document, { ...base, first, after });
+  if (call.kind !== "ok") {
+    return { kind: call.kind };
+  }
+  const page = mode === "search" ? parseSearchPage(call.data) : parseProductsPage(call.data);
+  if (page === null) {
+    return { kind: "failed" };
+  }
+  if (mode === "search" && page.totalCount === undefined) {
+    return { kind: "failed" };
+  }
+  return { kind: "ok", page };
 }
 
 const VARIANT_PAGE_LIMIT = 30;
