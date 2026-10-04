@@ -2,7 +2,18 @@ import { isRecord } from "./json.js";
 import { moneyAmount, sumMoney } from "./money.js";
 import type { FieldError } from "./problems.js";
 
-export type CartOperation = "query" | "cartCreate" | "cartLinesAdd" | "cartLinesUpdate" | "cartLinesRemove";
+export type CartOperation =
+  | "query"
+  | "cartCreate"
+  | "cartLinesAdd"
+  | "cartLinesUpdate"
+  | "cartLinesRemove"
+  | "cartDiscountCodesUpdate";
+
+export type DiscountCodeStatus = {
+  code: string;
+  applicable: boolean;
+};
 
 export type ShopifyLine = {
   lineGid: string;
@@ -50,10 +61,10 @@ export type CartView = {
 };
 
 export type CartResult =
-  | { kind: "ok"; shopifyCartId: string; view: CartView }
+  | { kind: "ok"; shopifyCartId: string; view: CartView; discountCodes?: DiscountCodeStatus[] }
   | { kind: "empty" }
   | { kind: "rejected"; errors: FieldError[] }
-  | { kind: "invalid" };
+  | { kind: "invalid"; discountCodes?: DiscountCodeStatus[] };
 
 type LinePage = {
   lines: ShopifyLine[];
@@ -66,6 +77,7 @@ const OPERATION_FIELD: Record<Exclude<CartOperation, "query">, string> = {
   cartLinesAdd: "cartLinesAdd",
   cartLinesUpdate: "cartLinesUpdate",
   cartLinesRemove: "cartLinesRemove",
+  cartDiscountCodesUpdate: "cartDiscountCodesUpdate",
 };
 
 export function readCartResult(data: unknown, operation: CartOperation): CartResult {
@@ -97,8 +109,15 @@ export function readCartResult(data: unknown, operation: CartOperation): CartRes
   if (!isRecord(payload.cart)) {
     return { kind: "invalid" };
   }
+  const discountCodes = operation === "cartDiscountCodesUpdate" ? readDiscountCodes(payload.cart) : undefined;
+  if (discountCodes === "invalid") {
+    return { kind: "invalid" };
+  }
   const parsed = readCart(payload.cart);
-  return parsed === null ? { kind: "invalid" } : { kind: "ok", ...parsed };
+  if (parsed === null) {
+    return discountCodes === undefined ? { kind: "invalid" } : { kind: "invalid", discountCodes };
+  }
+  return discountCodes === undefined ? { kind: "ok", ...parsed } : { kind: "ok", ...parsed, discountCodes };
 }
 
 export function readLinePage(data: unknown): LinePage | null {
@@ -271,14 +290,18 @@ function readTotals(cart: Record<string, unknown>): { totals: CartTotals; applie
         return null;
       }
       breakdown.push(discountEntry(amount, allocation.code, allocation.label));
-      applied.push({
-        amount: { amount, currency: allocation.currency },
-        ...(allocation.code !== undefined ? { code: allocation.code } : {}),
-        ...(allocation.label !== undefined ? { label: allocation.label } : {}),
-      });
+      if (allocation.code !== undefined) {
+        applied.push({
+          amount: { amount, currency: allocation.currency },
+          code: allocation.code,
+          label: allocation.label ?? allocation.code,
+        });
+      }
     }
     totals.discountBreakdown = breakdown;
-    result.appliedDiscounts = applied;
+    if (applied.length > 0) {
+      result.appliedDiscounts = applied;
+    }
   }
   return result;
 }
@@ -472,6 +495,20 @@ function readOptionalMoney(value: unknown): Money | null | "invalid" {
   return money === null ? "invalid" : money;
 }
 
+function readDiscountCodes(cart: Record<string, unknown>): DiscountCodeStatus[] | "invalid" {
+  if (!Object.hasOwn(cart, "discountCodes") || !Array.isArray(cart.discountCodes)) {
+    return "invalid";
+  }
+  const codes: DiscountCodeStatus[] = [];
+  for (const entry of cart.discountCodes) {
+    if (!isRecord(entry) || typeof entry.code !== "string" || typeof entry.applicable !== "boolean") {
+      return "invalid";
+    }
+    codes.push({ code: entry.code, applicable: entry.applicable });
+  }
+  return codes;
+}
+
 function readUserErrors(value: unknown[]): FieldError[] | "invalid" {
   const errors: FieldError[] = [];
   for (const entry of value) {
@@ -495,7 +532,12 @@ function userErrorField(value: unknown): string {
 }
 
 function publicUserMessage(message: string): string {
-  if (message.includes("key=") || message.includes("checkoutUrl") || message.includes("gid://shopify/Cart/")) {
+  if (
+    message.includes("key=") ||
+    message.includes("checkoutUrl") ||
+    message.includes("gid://shopify/Cart/") ||
+    message.includes("gid://shopify/CartLine/")
+  ) {
     return "Shopify rejected the cart change.";
   }
   return message;

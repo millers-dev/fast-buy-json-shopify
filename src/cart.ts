@@ -8,6 +8,7 @@ import { Ajv, type ErrorObject, type ValidateFunction } from "ajv";
 import { appendLines, readCartResult, readLinePage, toCartResponse, type CartOperation, type CartView, type ShopifyLine } from "./cart-map.js";
 import {
   CART_CREATE_DOCUMENT,
+  CART_DISCOUNT_CODES_UPDATE_DOCUMENT,
   CART_LINE_PAGE_DOCUMENT,
   CART_LINES_ADD_DOCUMENT,
   CART_LINES_REMOVE_DOCUMENT,
@@ -28,6 +29,7 @@ import {
   cartNotFound,
   idempotencyConflict,
   internalError,
+  invalidDiscountCode,
   productNotFound,
   rateLimited,
   validationError,
@@ -46,10 +48,12 @@ const MAX_LINE_PAGES = 20;
 
 const validateAdd = compileSchema("add-to-cart.json");
 const validateUpdate = compileSchema("cart-update-item.json");
+const validateDiscount = compileSchema("cart-discount.json");
 
 export type CartMatch =
   | { kind: "add" }
   | { kind: "cart" }
+  | { kind: "discount" }
   | { kind: "cart-id"; cartId: string }
   | { kind: "item"; itemId: string };
 
@@ -82,7 +86,10 @@ export function matchCartRequest(
     }
     return { match: "not-allowed", allow: "GET, DELETE" };
   }
-  if (pathname === `${CART_PATH}/discount` || pathname.startsWith(`${CART_PATH}/discount/`)) {
+  if (pathname === `${CART_PATH}/discount`) {
+    return method === "POST" ? { match: { kind: "discount" } } : { match: "not-allowed", allow: "POST" };
+  }
+  if (pathname.startsWith(`${CART_PATH}/discount/`)) {
     return { match: "ignore" };
   }
   const itemPrefix = `${CART_PATH}/items/`;
@@ -136,6 +143,9 @@ export async function handleCart(
       return;
     case "cart-id":
       await getCart(req, res, deps, route.cartId);
+      return;
+    case "discount":
+      await applyDiscount(req, res, deps);
       return;
     case "item":
       if (req.method === "DELETE") {
@@ -323,6 +333,79 @@ async function updateItem(
       writeDecryptOrThrow(res, error);
     }
   });
+}
+
+async function applyDiscount(req: IncomingMessage, res: ServerResponse, deps: ConnectorDeps): Promise<void> {
+  const requested = await readDiscountRequest(req);
+  if (!requested.ok) {
+    writeProblem(res, requested.problem);
+    return;
+  }
+  const buyerIp = publicBuyerIp(req.socket.remoteAddress);
+  await withCartLock(async () => {
+    try {
+      const stored = deps.tokens.getAnonymousCart(deps.app.shopDomain);
+      if (stored === null) {
+        writeProblem(res, cartNotFound());
+        return;
+      }
+      const ready = await commerceReady(deps);
+      if (!ready.ok) {
+        writeProblem(res, ready.problem);
+        return;
+      }
+      const call = await storefront(deps, ready.token, buyerIp, CART_DISCOUNT_CODES_UPDATE_DOCUMENT, {
+        cartId: stored.shopifyCartId,
+        discountCodes: requested.codes,
+      });
+      if (call.kind !== "ok") {
+        writeResult(res, await callFailure(deps, call.kind));
+        return;
+      }
+      const parsed = readCartResult(call.data, "cartDiscountCodesUpdate");
+      if (parsed.kind === "rejected") {
+        const detail = parsed.errors[0]?.message ?? "Shopify rejected the cart change.";
+        writeProblem(res, validationError(detail, parsed.errors));
+        return;
+      }
+      const discountCodes = parsed.kind === "ok" || parsed.kind === "invalid" ? parsed.discountCodes : undefined;
+      if (discountCodes !== undefined && discountCodes.some((entry) => entry.applicable === false)) {
+        const removed = await clearDiscountCodes(deps, ready.token, buyerIp, stored.shopifyCartId);
+        writeProblem(res, removed ? invalidDiscountCode() : internalError("The cart request could not be completed."));
+        return;
+      }
+      if (parsed.kind !== "ok" || discountCodes === undefined) {
+        writeProblem(res, internalError("The cart request could not be completed."));
+        return;
+      }
+      writeResult(res, await acceptMutation(deps, ready.token, buyerIp, stored, parsed, undefined, false));
+    } catch (error) {
+      writeDecryptOrThrow(res, error);
+    }
+  });
+}
+
+async function clearDiscountCodes(
+  deps: ConnectorDeps,
+  token: string,
+  buyerIp: string | undefined,
+  shopifyCartId: string,
+): Promise<boolean> {
+  const call = await storefront(deps, token, buyerIp, CART_DISCOUNT_CODES_UPDATE_DOCUMENT, {
+    cartId: shopifyCartId,
+    discountCodes: [],
+  });
+  if (call.kind === "unauthorized") {
+    await deps.tokens.exclusive(async () => {
+      deps.tokens.clearDelegate(deps.app.shopDomain, deps.now());
+    });
+    return false;
+  }
+  if (call.kind !== "ok") {
+    return false;
+  }
+  const parsed = readCartResult(call.data, "cartDiscountCodesUpdate");
+  return parsed.kind === "ok" && parsed.discountCodes !== undefined && parsed.discountCodes.every((entry) => entry.applicable);
 }
 
 async function deleteItem(req: IncomingMessage, res: ServerResponse, deps: ConnectorDeps, itemId: string): Promise<void> {
@@ -655,6 +738,45 @@ function readQuantity(value: unknown): number | null {
 function cloneExtensions(value: Record<string, unknown>): Record<string, unknown> {
   const parsed: unknown = JSON.parse(JSON.stringify(value));
   return isRecord(parsed) ? parsed : {};
+}
+
+async function readDiscountRequest(
+  req: IncomingMessage,
+): Promise<{ ok: true; codes: string[] } | { ok: false; problem: Problem }> {
+  let raw: Buffer;
+  try {
+    raw = await readRequestBody(req);
+  } catch (error) {
+    if (error instanceof RequestBodyTooLargeError) {
+      return { ok: false, problem: validationError("The request body is too large.") };
+    }
+    throw error;
+  }
+  const text = raw.toString("utf8");
+  if (text.trim() === "") {
+    return { ok: true, codes: [] };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text) as unknown;
+  } catch {
+    return { ok: false, problem: validationError("The request body must be JSON.") };
+  }
+  if (!validateDiscount(parsed)) {
+    return { ok: false, problem: validationError("The request body is invalid.", fieldErrors(validateDiscount.errors)) };
+  }
+  return { ok: true, codes: discountCodesFromBody(parsed) };
+}
+
+function discountCodesFromBody(body: unknown): string[] {
+  if (!isRecord(body) || !Object.hasOwn(body, "code") || body.code === null) {
+    return [];
+  }
+  if (typeof body.code !== "string") {
+    return [];
+  }
+  const trimmed = body.code.trim();
+  return trimmed === "" ? [] : [trimmed];
 }
 
 async function readValidated(
