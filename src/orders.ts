@@ -390,6 +390,6 @@ function compileOrderSchema(): ValidateFunction {
     readFileSync(join(readPackageMetadata(import.meta.url).root, "schemas", "order-status.json"), "utf8"),
   ) as object;
   const ajv = new Ajv({ allErrors: true, strict: false, validateFormats: true });
-  addFormatsModule.default(ajv, ["date-time", "uri"]);
+  addFormatsModule.default(ajv, ["date", "date-time", "uri"]);
   return ajv.compile(schema);
 }

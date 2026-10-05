@@ -694,7 +694,7 @@ function assertSafe(text: string): void {
 function validateSchema(name: string, body: unknown): boolean {
   const schema = JSON.parse(readFileSync(join(metadata.root, "schemas", name), "utf8")) as object;
   const ajv = new Ajv({ allErrors: true, strict: false, validateFormats: true });
-  addFormatsModule.default(ajv, ["uri", "date-time"]);
+  addFormatsModule.default(ajv, ["date", "uri", "date-time"]);
   const validate = ajv.compile(schema);
   const ok = validate(body);
   assert.deepEqual(validate.errors ?? [], []);
