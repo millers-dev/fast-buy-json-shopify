@@ -390,14 +390,14 @@ function readShopMoney(bag: unknown): Money | null | "missing" {
 }
 
 function mapPayment(gateways: unknown, financial: string | null): Payment | undefined | "invalid" {
-  if (financial === null || !Array.isArray(gateways) || gateways.length === 0) {
+  if (financial === null || !isFinancial(financial)) {
+    return undefined;
+  }
+  if (!Array.isArray(gateways) || gateways.length === 0) {
     return undefined;
   }
   const method = gateways[0];
   if (typeof method !== "string" || method === "") {
-    return "invalid";
-  }
-  if (!isFinancial(financial)) {
     return "invalid";
   }
   return { method, status: paymentStatus(financial) };

@@ -74,38 +74,38 @@ export async function handleOrder(
   req.resume();
   const lookup = classifyOrderToken(orderId);
   if (lookup.kind === "reject") {
-    finish(res, orderNotFound(), orderId);
+    finish(res, orderNotFound(), orderId, lookup);
     return;
   }
   const admin = await readAdminToken(deps);
   if (!admin.ok) {
-    finish(res, admin.problem, orderId);
+    finish(res, admin.problem, orderId, lookup);
     return;
   }
   const loaded = await loadOrder(deps, admin.token, lookup);
   switch (loaded.kind) {
     case "ok":
       if (!validateOrderStatus(loaded.body)) {
-        finish(res, internalError("The order response could not be completed."), orderId);
+        finish(res, internalError("The order response could not be completed."), orderId, lookup);
         return;
       }
-      logOrder(200, orderId);
+      logOrder(200, orderId, lookup);
       writeJson(res, 200, loaded.body, NO_STORE);
       return;
     case "not_found":
-      finish(res, orderNotFound(), orderId);
+      finish(res, orderNotFound(), orderId, lookup);
       return;
     case "throttled":
-      finish(res, rateLimited("Shopify throttled the order request."), orderId);
+      finish(res, rateLimited("Shopify throttled the order request."), orderId, lookup);
       return;
     case "reinstall":
-      finish(res, internalError(REINSTALL_DETAIL), orderId);
+      finish(res, internalError(REINSTALL_DETAIL), orderId, lookup);
       return;
     case "failed":
-      finish(res, internalError("The order request could not be completed."), orderId);
+      finish(res, internalError("The order request could not be completed."), orderId, lookup);
       return;
     case "invalid":
-      finish(res, internalError("The order response could not be completed."), orderId);
+      finish(res, internalError("The order response could not be completed."), orderId, lookup);
       return;
     default: {
       const unexpected: never = loaded;
@@ -364,14 +364,29 @@ async function readAdminToken(
   }
 }
 
-function finish(res: ServerResponse, problem: Problem, orderId: string): void {
-  logOrder(problem.status, orderId);
+function finish(res: ServerResponse, problem: Problem, orderId: string, lookup: OrderLookup): void {
+  logOrder(problem.status, orderId, lookup);
   writeProblem(res, problem);
 }
 
-function logOrder(status: number, orderId: string): void {
-  const label = orderId.toLowerCase().includes("gid://") ? "gid lookup" : orderId;
-  console.log(`order status ${status} ${label}`);
+function logOrder(status: number, orderId: string, lookup: OrderLookup): void {
+  console.log(`order status ${status} ${orderLogLabel(orderId, lookup)}`);
+}
+
+function orderLogLabel(orderId: string, lookup: OrderLookup): string {
+  switch (lookup.kind) {
+    case "reject":
+      return "rejected token";
+    case "gid":
+      return "gid lookup";
+    case "digits":
+    case "search":
+      return orderId;
+    default: {
+      const unexpected: never = lookup;
+      throw new Error(`Unhandled order lookup: ${String(unexpected)}`);
+    }
+  }
 }
 
 function decodeOrderId(rest: string): string | null {

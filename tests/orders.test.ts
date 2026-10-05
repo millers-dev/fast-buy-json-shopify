@@ -280,8 +280,30 @@ describe("GET /api/fastbuyjson/orders/{orderId}", () => {
     const tooLong = await getOrder(base, "a".repeat(41));
     assertNotFound(tooLong);
     assert.equal(calls.length, 0);
-    assert.equal(logs.some((line) => line.includes("gid lookup")), true);
+    assert.deepEqual(logs, [
+      "order status 404 rejected token",
+      "order status 404 rejected token",
+      "order status 404 rejected token",
+    ]);
     assertSafe(logs.join("\n"));
+  });
+
+  it("logs a fixed label when a rejected order id contains %0A or @", async () => {
+    const newline = await requestOrder(base, "/api/fastbuyjson/orders/%0Aorder%20status%20200%20owned");
+    assertNotFound(newline);
+    assert.equal(calls.length, 0);
+    assert.deepEqual(logs, ["order status 404 rejected token"]);
+    assert.equal(logs.some((line) => line.includes("\n") || line.includes("owned") || line.includes("%0A")), false);
+    assert.equal(newline.text.includes("owned"), false);
+
+    logs.length = 0;
+    calls.length = 0;
+    const email = await getOrder(base, "user@shop.test");
+    assertNotFound(email);
+    assert.equal(calls.length, 0);
+    assert.deepEqual(logs, ["order status 404 rejected token"]);
+    assert.equal(logs.some((line) => line.includes("@") || line.includes("user@shop.test")), false);
+    assert.equal(email.text.includes("@"), false);
   });
 
   it("maps status with refunded only for a full refund and never emits delivered", async () => {
@@ -422,6 +444,25 @@ describe("GET /api/fastbuyjson/orders/{orderId}", () => {
     const body = assertOrder(await getOrder(base, "1001"));
     assert.equal(body.order.status, "processing");
     assert.equal(body.order.payment, undefined);
+  });
+
+  it("omits payment and returns the order when the financial status is unknown", async () => {
+    const processing = orderFixture();
+    processing.displayFinancialStatus = "UNKNOWN_STATUS";
+    script.push(() => jsonResponse(200, asOrders([processing])));
+    const processingBody = assertOrder(await getOrder(base, "1001"));
+    assert.equal(processingBody.order.status, "processing");
+    assert.equal(processingBody.order.payment, undefined);
+    assert.equal(Object.hasOwn(processingBody.order, "payment"), false);
+
+    calls.length = 0;
+    const shipped = orderFixture();
+    shipped.displayFinancialStatus = "UNKNOWN_STATUS";
+    shipped.displayFulfillmentStatus = "FULFILLED";
+    script.push(() => jsonResponse(200, asOrders([shipped])));
+    const shippedBody = assertOrder(await getOrder(base, "1001"));
+    assert.equal(shippedBody.order.status, "shipped");
+    assert.equal(shippedBody.order.payment, undefined);
   });
 
   it("returns 200 when a selected field is redacted and the order is still present", async () => {
@@ -637,6 +678,10 @@ function expectAdmin(call: GraphqlCall): void {
 
 async function getOrder(base: string, id: string, headers: Record<string, string> = {}): Promise<HttpResult> {
   const path = id === "" ? "/api/fastbuyjson/orders/" : `/api/fastbuyjson/orders/${encodeURIComponent(id)}`;
+  return requestOrder(base, path, headers);
+}
+
+async function requestOrder(base: string, path: string, headers: Record<string, string> = {}): Promise<HttpResult> {
   const response = await fetch(`${base}${path}`, { headers });
   const text = await response.text();
   let json: unknown;
