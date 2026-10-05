@@ -894,14 +894,15 @@ describe("POST /api/fastbuyjson/products/search", () => {
     });
     assert.equal(calls.length, 0);
 
-    for (const path of [
-      "/api/fastbuyjson/cart",
-      "/api/fastbuyjson/checkout/initiate",
-      "/api/fastbuyjson/checkout/confirm",
-      "/api/fastbuyjson/cart/discount",
-    ]) {
+    for (const path of ["/api/fastbuyjson/cart", "/api/fastbuyjson/cart/discount"]) {
       const response = await fetch(`${base}${path}`, { method: "POST" });
       assert.equal(response.status, 404);
+    }
+    for (const path of ["/api/fastbuyjson/checkout/initiate", "/api/fastbuyjson/checkout/confirm"]) {
+      const response = await fetch(`${base}${path}`, { method: "POST" });
+      assert.equal(response.status, 400);
+      const problem = (await response.json()) as { code?: string };
+      assert.equal(problem.code, "VALIDATION_ERROR");
     }
     const shipping = await fetch(`${base}/api/fastbuyjson/shipping/options`);
     assert.equal(shipping.status, 404);

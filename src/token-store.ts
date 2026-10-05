@@ -71,6 +71,17 @@ CREATE TABLE IF NOT EXISTS cart_line (
   line_ciphertext BLOB NOT NULL
 )`;
 
+const CHECKOUT_SESSION_SCHEMA = `
+CREATE TABLE IF NOT EXISTS checkout_session (
+  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+  cart_id TEXT NOT NULL,
+  session_token TEXT NOT NULL,
+  verification_token TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  url_nonce BLOB NOT NULL,
+  url_ciphertext BLOB NOT NULL
+)`;
+
 const IDEMPOTENCY_SCHEMA = `
 CREATE TABLE IF NOT EXISTS idempotency_record (
   scope TEXT NOT NULL,
@@ -125,6 +136,7 @@ export class TokenStore {
     db.run(SCHEMA);
     db.run(CART_SCHEMA);
     db.run(LINE_SCHEMA);
+    db.run(CHECKOUT_SESSION_SCHEMA);
     db.run(IDEMPOTENCY_SCHEMA);
     return new TokenStore(db, filePath, key);
   }
@@ -248,7 +260,12 @@ export class TokenStore {
       this.db.run("DELETE FROM idempotency_record");
       idempotencyDeleted = this.db.getRowsModified() > 0;
     }
-    if (deleted || cartDeleted || idempotencyDeleted) {
+    let sessionDeleted = false;
+    if (deleted || cartDeleted) {
+      this.db.run("DELETE FROM checkout_session");
+      sessionDeleted = this.db.getRowsModified() > 0;
+    }
+    if (deleted || cartDeleted || idempotencyDeleted || sessionDeleted) {
       this.persist();
     }
     return deleted;
@@ -386,6 +403,61 @@ export class TokenStore {
     this.persist();
   }
 
+  saveCheckoutSession(shopDomain: string, session: StoredCheckoutSession): void {
+    const url = encryptSecret(this.key, session.checkoutUrl, checkoutAad(shopDomain, session.cartId));
+    this.db.run(
+      `INSERT INTO checkout_session (
+         singleton, cart_id, session_token, verification_token, expires_at, url_nonce, url_ciphertext
+       ) VALUES (1, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(singleton) DO UPDATE SET
+         cart_id = excluded.cart_id,
+         session_token = excluded.session_token,
+         verification_token = excluded.verification_token,
+         expires_at = excluded.expires_at,
+         url_nonce = excluded.url_nonce,
+         url_ciphertext = excluded.url_ciphertext`,
+      [
+        session.cartId,
+        session.sessionToken,
+        session.verificationToken,
+        session.expiresAt,
+        new Uint8Array(url.nonce),
+        new Uint8Array(url.ciphertext),
+      ],
+    );
+    this.persist();
+  }
+
+  getCheckoutSession(shopDomain: string, sessionToken: string): StoredCheckoutSession | null {
+    const row = this.one(
+      `SELECT cart_id, session_token, verification_token, expires_at, url_nonce, url_ciphertext
+       FROM checkout_session WHERE singleton = 1`,
+    );
+    if (row === undefined) {
+      return null;
+    }
+    const cartId = readString(row, "cart_id");
+    const storedToken = readString(row, "session_token");
+    const verificationToken = readString(row, "verification_token");
+    const expiresAt = readNullableInt(row, "expires_at");
+    if (cartId === null || storedToken === null || verificationToken === null || expiresAt === null) {
+      throw new TokenDecryptError();
+    }
+    if (storedToken !== sessionToken) {
+      return null;
+    }
+    const checkoutUrl = this.readSecret(row, "url", checkoutAad(shopDomain, cartId));
+    if (checkoutUrl === null) {
+      throw new TokenDecryptError();
+    }
+    return { cartId, sessionToken: storedToken, verificationToken, expiresAt, checkoutUrl };
+  }
+
+  clearCheckoutSession(): void {
+    this.db.run("DELETE FROM checkout_session");
+    this.persist();
+  }
+
   lookupIdempotency(scope: string, key: string, fingerprint: string, now: number): IdempotencyLookup {
     const row = this.one(
       `SELECT fingerprint, status, body_json, expires_at
@@ -444,6 +516,11 @@ export class TokenStore {
 
   clearIdempotency(): void {
     this.db.run("DELETE FROM idempotency_record");
+    this.persist();
+  }
+
+  compact(): void {
+    this.db.run("VACUUM");
     this.persist();
   }
 
@@ -543,6 +620,14 @@ export type StoredCart = {
   lines: StoredCartLine[];
 };
 
+export type StoredCheckoutSession = {
+  cartId: string;
+  sessionToken: string;
+  verificationToken: string;
+  expiresAt: number;
+  checkoutUrl: string;
+};
+
 export type IdempotencyLookup =
   | { kind: "miss" }
   | { kind: "replay"; status: number; body: unknown }
@@ -550,6 +635,10 @@ export type IdempotencyLookup =
 
 function cartAad(shopDomain: string): string {
   return `${shopDomain}\u0000cart`;
+}
+
+function checkoutAad(shopDomain: string, cartId: string): string {
+  return `${shopDomain}\u0000checkout\u0000${cartId}`;
 }
 
 function lineAad(shopDomain: string, itemId: string): string {

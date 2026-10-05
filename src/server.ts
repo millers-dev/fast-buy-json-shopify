@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 
 import { handleCart, matchCartRequest } from "./cart.js";
+import { handleCheckout, matchCheckoutRequest } from "./checkout.js";
 import { prepareCommerceAccess } from "./commerce-token.js";
 import type { ConnectorConfig } from "./config.js";
 import type { ConnectorDeps } from "./deps.js";
@@ -93,6 +94,22 @@ async function route(
       return;
     }
     await handleCart(req, res, deps, cartRoute.match);
+    return;
+  }
+
+  const checkoutRoute = matchCheckoutRequest(req.method ?? "GET", pathname);
+  if (checkoutRoute.match !== "ignore") {
+    if (checkoutRoute.match === "not-allowed") {
+      req.resume();
+      writeJson(res, 405, { error: "method_not_allowed" }, { Allow: checkoutRoute.allow, "Cache-Control": "no-store" });
+      return;
+    }
+    if (deps === undefined) {
+      req.resume();
+      writeJson(res, 404, { error: "not_found" }, { "Cache-Control": "no-store" });
+      return;
+    }
+    await handleCheckout(req, res, deps, checkoutRoute.match);
     return;
   }
 

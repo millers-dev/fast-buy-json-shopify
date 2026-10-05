@@ -9,6 +9,10 @@ export const ANONYMOUS_SCOPE = "anonymous";
 /** Route path inside `/api/fastbuyjson`, matching the contract fingerprint. */
 export const CART_ADD_ROUTE = "/cart/add";
 
+/** Route paths inside `/api/fastbuyjson`, matching the contract fingerprint. */
+export const CHECKOUT_INITIATE_ROUTE = "/checkout/initiate";
+export const CHECKOUT_CONFIRM_ROUTE = "/checkout/confirm";
+
 export function canonicalJson(body: unknown): string {
   if (body === undefined || body === null) {
     return stableStringify({});

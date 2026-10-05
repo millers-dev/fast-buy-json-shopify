@@ -379,7 +379,7 @@ describe("commerce token refresh", () => {
   it("does not replace a stored shop when the process is configured for another", async () => {
     await withHarness(async (harness) => {
     harness.tokens.save(sampleToken(SHOP, ACCESS_TOKEN, REFRESH_TOKEN), FIXED_NOW);
-    const response = await send(harness.base, "/api/fastbuyjson/checkout/initiate", { method: "POST" });
+    const response = await send(harness.base, "/api/fastbuyjson/shipping/options");
     assert.equal(response.status, 500);
     const body = JSON.parse(response.text) as { detail?: string; code?: string };
     assert.equal(body.code, "INTERNAL_ERROR");
