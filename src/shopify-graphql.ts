@@ -11,6 +11,13 @@ export type ShopifyCall =
   | { kind: "unauthorized" }
   | { kind: "failed" };
 
+/** Admin order reads. Field-level protected-data denials keep the rest of the payload. */
+export type OrderAdminCall =
+  | { kind: "ok"; data: unknown }
+  | { kind: "throttled" }
+  | { kind: "reinstall" }
+  | { kind: "failed" };
+
 export function adminGraphqlUrl(shopDomain: string, apiVersion: string): string {
   return `https://${shopDomain}/admin/api/${apiVersion}/graphql.json`;
 }
@@ -45,7 +52,46 @@ export async function shopifyGraphql(args: GraphqlArgs): Promise<ShopifyCall> {
   return callOnce(args);
 }
 
+export async function orderAdminGraphql(args: GraphqlArgs): Promise<OrderAdminCall> {
+  const first = await orderCallOnce(args);
+  if (first.kind !== "throttled") {
+    return first;
+  }
+  await args.sleep(SHOPIFY_BACKOFF_MS);
+  return orderCallOnce(args);
+}
+
+type FetchedGraphql =
+  | { kind: "throttled" }
+  | { kind: "failed" }
+  | { kind: "http"; status: number; ok: boolean; payload: unknown };
+
 async function callOnce(args: GraphqlArgs): Promise<ShopifyCall> {
+  const fetched = await fetchGraphql(args);
+  if (fetched.kind !== "http") {
+    return fetched;
+  }
+  if (isUnauthorized(fetched.status, fetched.payload)) {
+    return { kind: "unauthorized" };
+  }
+  if (!fetched.ok || !isRecord(fetched.payload) || !isRecord(fetched.payload.data)) {
+    return { kind: "failed" };
+  }
+  if (hasErrors(fetched.payload)) {
+    return { kind: "failed" };
+  }
+  return { kind: "ok", data: fetched.payload.data };
+}
+
+async function orderCallOnce(args: GraphqlArgs): Promise<OrderAdminCall> {
+  const fetched = await fetchGraphql(args);
+  if (fetched.kind !== "http") {
+    return fetched;
+  }
+  return classifyOrderPayload(fetched.status, fetched.payload);
+}
+
+async function fetchGraphql(args: GraphqlArgs): Promise<FetchedGraphql> {
   const headers: Record<string, string> = {
     Accept: "application/json",
     "Content-Type": "application/json",
@@ -70,16 +116,72 @@ async function callOnce(args: GraphqlArgs): Promise<ShopifyCall> {
   if (isThrottled(response.status, payload)) {
     return { kind: "throttled" };
   }
-  if (isUnauthorized(response.status, payload)) {
-    return { kind: "unauthorized" };
+  return { kind: "http", status: response.status, ok: response.ok, payload };
+}
+
+function classifyOrderPayload(status: number, payload: unknown): OrderAdminCall {
+  if (status === 401 || hasRootAccessDenied(payload)) {
+    return { kind: "reinstall" };
   }
-  if (!response.ok || !isRecord(payload) || !isRecord(payload.data)) {
+  if (status < 200 || status >= 300 || !isRecord(payload) || !isRecord(payload.data)) {
+    if (isRecord(payload) && hasAccessDenied(payload)) {
+      return { kind: "reinstall" };
+    }
     return { kind: "failed" };
   }
-  if (hasErrors(payload)) {
-    return { kind: "failed" };
+  if (!hasErrors(payload)) {
+    return { kind: "ok", data: payload.data };
   }
-  return { kind: "ok", data: payload.data };
+  if (errorsAreFieldRedactions(payload.errors) && orderPayloadPopulated(payload.data)) {
+    return { kind: "ok", data: payload.data };
+  }
+  if (hasAccessDenied(payload) && !orderPayloadPopulated(payload.data)) {
+    return { kind: "reinstall" };
+  }
+  return { kind: "failed" };
+}
+
+function orderPayloadPopulated(data: Record<string, unknown>): boolean {
+  if (isRecord(data.order)) {
+    return true;
+  }
+  if (!isRecord(data.orders) || !Array.isArray(data.orders.nodes)) {
+    return false;
+  }
+  return data.orders.nodes.some((node) => isRecord(node));
+}
+
+function hasRootAccessDenied(payload: unknown): boolean {
+  if (!isRecord(payload) || !Array.isArray(payload.errors)) {
+    return false;
+  }
+  return payload.errors.some((error) => {
+    if (!isAccessDeniedError(error)) {
+      return false;
+    }
+    return !isRecord(error) || !Array.isArray(error.path) || error.path.length < 2;
+  });
+}
+
+function errorsAreFieldRedactions(errors: unknown): boolean {
+  if (!Array.isArray(errors) || errors.length === 0) {
+    return false;
+  }
+  return errors.every((error) => {
+    if (!isAccessDeniedError(error) || !isRecord(error) || !Array.isArray(error.path) || error.path.length < 2) {
+      return false;
+    }
+    const root = error.path[0];
+    return root === "order" || root === "orders";
+  });
+}
+
+function hasAccessDenied(payload: Record<string, unknown>): boolean {
+  return Array.isArray(payload.errors) && payload.errors.some((error) => isAccessDeniedError(error));
+}
+
+function isAccessDeniedError(error: unknown): error is Record<string, unknown> {
+  return isRecord(error) && isRecord(error.extensions) && error.extensions.code === "ACCESS_DENIED";
 }
 
 async function readPayload(response: Response): Promise<unknown> {

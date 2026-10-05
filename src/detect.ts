@@ -10,7 +10,7 @@ export const SUPPORTED_FEATURES = [
   "hosted_checkout",
 ] as const;
 
-export const ENDPOINTS = ["products", "cart", "checkout"] as const;
+export const ENDPOINTS = ["products", "cart", "checkout", "orders"] as const;
 
 export type DetectResponse = {
   standard: "FastBuyJSON";
@@ -23,7 +23,7 @@ export type DetectResponse = {
     discounts: { stackable: false; maxCodes: 1 };
     checkout: { handoff: "shopify_hosted"; confirmCreatesOrder: false };
   };
-  endpoints: readonly ["products", "cart", "checkout"];
+  endpoints: readonly ["products", "cart", "checkout", "orders"];
   authentication: { methods: readonly ["anonymous"] };
   merchantInfo?: { name: string; url: string };
 };

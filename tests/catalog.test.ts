@@ -35,7 +35,7 @@ import { moneyAmount } from "../src/money.js";
 import { OauthStateStore } from "../src/oauth-state.js";
 import { createConnectorServer, listen } from "../src/server.js";
 import { SHOPIFY_BACKOFF_MS, shopifyGraphql } from "../src/shopify-graphql.js";
-import { SHOPIFY_SCOPE_PARAM, SHOPIFY_SCOPES } from "../src/scopes.js";
+import { SHOPIFY_SCOPE_PARAM, STOREFRONT_SCOPES } from "../src/scopes.js";
 import { TokenStore } from "../src/token-store.js";
 import { readPackageMetadata } from "../src/version.js";
 
@@ -308,7 +308,8 @@ describe("POST /api/fastbuyjson/products/search", () => {
     const mint = graphqlCall(calls, 0);
     assert.equal(mint.url, `https://${SHOP}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`);
     assert.equal(mint.headers["X-Shopify-Access-Token"], ADMIN_TOKEN);
-    assert.deepEqual(mint.variables.scopes, [...SHOPIFY_SCOPES]);
+    assert.deepEqual(mint.variables.scopes, [...STOREFRONT_SCOPES]);
+    assert.equal((mint.variables.scopes as string[]).includes("read_orders"), false);
     assert.equal(mint.query.includes("storefrontAccessTokenCreate"), false);
     const search = graphqlCall(calls, 1);
     assert.equal(search.url, `https://${SHOP}/api/${SHOPIFY_API_VERSION}/graphql.json`);

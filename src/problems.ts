@@ -5,6 +5,7 @@ export type ProblemCode =
   | "PRODUCT_NOT_FOUND"
   | "CART_NOT_FOUND"
   | "CART_ITEM_NOT_FOUND"
+  | "ORDER_NOT_FOUND"
   | "IDEMPOTENCY_KEY_CONFLICT"
   | "INVALID_DISCOUNT_CODE"
   | "INVALID_CHECKOUT_SESSION"
@@ -83,6 +84,16 @@ export function cartNotFound(detail = "No cart exists for the current identity")
     status: 404,
     code: "CART_NOT_FOUND",
     detail: detail.includes("key=") ? "No cart exists for the current identity" : detail,
+  };
+}
+
+export function orderNotFound(): Problem {
+  return {
+    type: "https://fastbuyjson.org/problems/order-not-found",
+    title: "Order not found",
+    status: 404,
+    code: "ORDER_NOT_FOUND",
+    detail: "No order matches that id.",
   };
 }
 

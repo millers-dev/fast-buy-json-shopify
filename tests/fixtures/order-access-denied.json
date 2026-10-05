@@ -1,0 +1,15 @@
+{
+  "errors": [
+    {
+      "message": "Access denied for order field. Required access: `read_orders` access scope.",
+      "path": ["order"],
+      "extensions": {
+        "code": "ACCESS_DENIED",
+        "requiredAccess": "`read_orders` access scope."
+      }
+    }
+  ],
+  "data": {
+    "order": null
+  }
+}

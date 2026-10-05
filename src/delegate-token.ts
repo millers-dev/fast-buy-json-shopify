@@ -4,7 +4,7 @@ import type { ConnectorDeps } from "./deps.js";
 import { adminGraphqlUrl, defaultSleep, shopifyGraphql } from "./shopify-graphql.js";
 import { isRecord } from "./json.js";
 import { DECRYPT_DETAIL, ONE_SHOP_DETAIL, REINSTALL_DETAIL, internalError, rateLimited, type Problem } from "./problems.js";
-import { SHOPIFY_SCOPES } from "./scopes.js";
+import { STOREFRONT_SCOPES } from "./scopes.js";
 import { TokenDecryptError } from "./token-store.js";
 
 export type DelegateResult = { ok: true; token: string } | { ok: false; problem: Problem };
@@ -38,7 +38,7 @@ async function mintOrReuse(deps: ConnectorDeps): Promise<DelegateResult> {
     tokenHeader: "X-Shopify-Access-Token",
     token: row.accessToken,
     query: DELEGATE_DOCUMENT,
-    variables: { scopes: [...SHOPIFY_SCOPES] },
+    variables: { scopes: [...STOREFRONT_SCOPES] },
     fetch: deps.fetch,
     sleep: deps.sleep ?? defaultSleep,
   });
