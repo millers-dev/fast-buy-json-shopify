@@ -47,7 +47,7 @@ describe("buildDetectResponse", () => {
       "pagination",
       "hosted_checkout",
     ]);
-    assert.deepEqual(body.endpoints, ["products", "cart", "checkout"]);
+    assert.deepEqual(body.endpoints, ["products", "cart", "checkout", "orders"]);
     assert.deepEqual(body.authentication, { methods: ["anonymous"] });
     assert.equal(body.capabilities.checkout.confirmCreatesOrder, false);
     assert.deepEqual(body.capabilities, {
@@ -195,8 +195,9 @@ function assertSeedCatalogAbsent(body: DetectResponse): void {
   assert.equal(JSON.stringify(body.capabilities.shipping).includes("express"), false);
   assert.equal(body.capabilities.tax.mode, "shopify_estimated");
   const endpoints: readonly string[] = body.endpoints;
-  assert.equal(endpoints.includes("orders"), false);
+  assert.equal(endpoints.includes("orders"), true);
   assert.equal(endpoints.includes("auth"), false);
+  assert.equal(Object.hasOwn(body, "auth"), false);
 }
 
 function validateDetect(body: unknown): boolean {

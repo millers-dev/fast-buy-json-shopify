@@ -1,0 +1,102 @@
+{
+  "id": "gid://shopify/Order/469306983",
+  "name": "#1001",
+  "cancelledAt": null,
+  "displayFinancialStatus": "PAID",
+  "displayFulfillmentStatus": "UNFULFILLED",
+  "createdAt": "2025-09-08T12:34:56.789Z",
+  "updatedAt": "2025-09-08T12:45:22.123Z",
+  "email": "buyer@example.com",
+  "phone": "+15555550100",
+  "customer": { "displayName": "Ada Lovelace" },
+  "shippingAddress": {
+    "address1": "123 Main St",
+    "city": "Berlin",
+    "countryCodeV2": "DE",
+    "zip": "10115"
+  },
+  "billingAddress": {
+    "address1": "9 Billing Rd",
+    "city": "Berlin",
+    "countryCodeV2": "DE",
+    "zip": "10115"
+  },
+  "transactions": [
+    {
+      "paymentDetails": {
+        "__typename": "CardPaymentDetails",
+        "number": "•••• •••• •••• 4242",
+        "paymentMethodName": "Visa"
+      }
+    }
+  ],
+  "paymentGatewayNames": ["shopify_payments"],
+  "currentSubtotalPriceSet": { "shopMoney": { "amount": "19.99", "currencyCode": "USD" } },
+  "subtotalPriceSet": { "shopMoney": { "amount": "19.99", "currencyCode": "USD" } },
+  "currentTotalTaxSet": null,
+  "totalTaxSet": null,
+  "currentShippingPriceSet": { "shopMoney": { "amount": "10.00", "currencyCode": "USD" } },
+  "totalShippingPriceSet": { "shopMoney": { "amount": "10.00", "currencyCode": "USD" } },
+  "currentTotalDiscountsSet": { "shopMoney": { "amount": "0.00", "currencyCode": "USD" } },
+  "totalDiscountsSet": null,
+  "currentTotalPriceSet": { "shopMoney": { "amount": "29.99", "currencyCode": "USD" } },
+  "totalPriceSet": { "shopMoney": { "amount": "29.99", "currencyCode": "USD" } },
+  "lineItems": {
+    "pageInfo": { "hasNextPage": false, "endCursor": null },
+    "nodes": [
+      {
+        "title": "ACME Wireless Headphones Pro",
+        "quantity": 2,
+        "sku": "line-sku",
+        "variant": {
+          "sku": "variant-sku",
+          "legacyResourceId": "2001",
+          "selectedOptions": [{ "name": "Color", "value": "Black" }]
+        },
+        "discountedUnitPriceSet": { "shopMoney": { "amount": "19.99", "currencyCode": "USD" } },
+        "originalUnitPriceSet": { "shopMoney": { "amount": "21.00", "currencyCode": "USD" } },
+        "discountedTotalSet": { "shopMoney": { "amount": "39.98", "currencyCode": "USD" } },
+        "originalTotalSet": { "shopMoney": { "amount": "42.00", "currencyCode": "USD" } }
+      },
+      {
+        "title": "Line sku only",
+        "quantity": 1,
+        "sku": "line-only-sku",
+        "variant": {
+          "sku": null,
+          "legacyResourceId": "2002",
+          "selectedOptions": []
+        },
+        "discountedUnitPriceSet": null,
+        "originalUnitPriceSet": { "shopMoney": { "amount": "10.00", "currencyCode": "USD" } },
+        "discountedTotalSet": null,
+        "originalTotalSet": { "shopMoney": { "amount": "10.00", "currencyCode": "USD" } }
+      },
+      {
+        "title": "Legacy id only",
+        "quantity": 1,
+        "sku": null,
+        "variant": {
+          "sku": " ",
+          "legacyResourceId": "2003",
+          "selectedOptions": []
+        },
+        "discountedUnitPriceSet": { "shopMoney": { "amount": "5.00", "currencyCode": "USD" } },
+        "originalUnitPriceSet": { "shopMoney": { "amount": "5.00", "currencyCode": "USD" } },
+        "discountedTotalSet": { "shopMoney": { "amount": "5.00", "currencyCode": "USD" } },
+        "originalTotalSet": { "shopMoney": { "amount": "5.00", "currencyCode": "USD" } }
+      },
+      {
+        "title": "Unidentified spare",
+        "quantity": 1,
+        "sku": null,
+        "variant": null,
+        "discountedUnitPriceSet": { "shopMoney": { "amount": "1.00", "currencyCode": "USD" } },
+        "originalUnitPriceSet": { "shopMoney": { "amount": "1.00", "currencyCode": "USD" } },
+        "discountedTotalSet": { "shopMoney": { "amount": "1.00", "currencyCode": "USD" } },
+        "originalTotalSet": { "shopMoney": { "amount": "1.00", "currencyCode": "USD" } }
+      }
+    ]
+  },
+  "fulfillments": []
+}

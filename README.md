@@ -4,7 +4,7 @@ This repository is the Shopify store connector for [FastBuyJSON](https://github.
 
 FastBuyJSON itself — the contract, the Node and Python reference servers, the TypeScript SDK, and the stdio MCP server — stays in `millers-dev/fast-buy-json`. Point that MCP server at this process with `FASTBUYJSON_API_URL=http://localhost:3100/api/fastbuyjson`. This package is not part of that repository and it is not published to npm.
 
-It is early. The accepted plan is `docs/SHOPIFY_PLAN.md` in `millers-dev/fast-buy-json`. This tree implements discovery, one-shop OAuth, catalog search, an anonymous cart, one discount code, hosted checkout handoff, and shipping-option discovery.
+It is early. The accepted plans are `docs/SHOPIFY_PLAN.md` and `docs/SHOPIFY_ORDERS_PLAN.md` in `millers-dev/fast-buy-json`. This tree implements discovery, one-shop OAuth, catalog search, an anonymous cart, one discount code, hosted checkout handoff, shipping-option discovery, and order status.
 
 ## What v1 does
 
@@ -13,7 +13,7 @@ v1 is one Shopify shop speaking FastBuyJSON discovery, catalog search, cart, and
 `GET /detect` is public and sends `Cache-Control: public, max-age=300`. It advertises:
 
 - `standard` `FastBuyJSON`, `specVersion` `1.0.0`, and this package’s version
-- endpoints `products`, `cart`, and `checkout` (`orders` and `auth` stay off)
+- endpoints `products`, `cart`, `checkout`, and `orders` (`auth` stays off)
 - anonymous buyers, one discount code (`stackable: false`)
 - tax mode `shopify_estimated`
 - shipping from the shop’s Shopify delivery groups, not the reference seed catalog
@@ -24,7 +24,7 @@ v1 is one Shopify shop speaking FastBuyJSON discovery, catalog search, cart, and
 - Charge a card, wallet, PayPal, or Shop Pay
 - Create a Shopify order, including from `POST /checkout/confirm`
 - Call Checkout MCP `complete_checkout`
-- Read order status or customer records
+- Read customer records, or return an order address or card fragment
 - Run the reference seed catalog (`standard` / `express` shipping, free shipping over USD 100, seed tax rates, or promo codes `SAVE10` / `WELCOME5`)
 
 Checkout stays on Shopify. This package does not charge cards or create orders.
@@ -41,6 +41,7 @@ Requested scopes, and no others:
 - `unauthenticated_read_product_inventory`
 - `unauthenticated_read_checkouts`
 - `unauthenticated_write_checkouts`
+- `read_orders`
 
 Two grants:
 
@@ -51,7 +52,9 @@ The Admin access token and refresh token are encrypted with `TOKEN_ENCRYPTION_KE
 
 `app/uninstalled` and `shop/redact` are HMAC-checked and delete that shop row. `customers/data_request` and `customers/redact` are HMAC-checked, acknowledged, and do not build a customer archive. Point them at `{APP_URL}/api/shopify/webhooks/<topic>` (slashes in the topic become path segments) or at `{APP_URL}/api/shopify/webhooks` and let `X-Shopify-Topic` select the handler.
 
-When a stored token must be refreshed before a commerce call and the refresh fails, the cached access token is cleared and the call returns **500** `INTERNAL_ERROR`. The body says the shop must be reinstalled and does not contain a token. Order status is not implemented, so `GET /orders/{orderId}` stays **404** while the stored token is usable.
+When a stored token must be refreshed before a commerce call and the refresh fails, the cached access token is cleared and the call returns **500** `INTERNAL_ERROR`. The body says the shop must be reinstalled and does not contain a token.
+
+`read_orders` is requested on the next install. A token saved before that grant does not gain the scope by itself. Catalog, cart, and checkout keep working on that token. `GET /orders/{orderId}` returns **500** `INTERNAL_ERROR` until the merchant installs again, and that response does not clear the stored token. Still omitted: `write_orders`, `read_all_orders`, `read_customers`, `write_customers`, and any Admin product or draft-order scope. The Storefront delegate token stays limited to the four `unauthenticated_*` scopes. `read_orders` is not delegated.
 
 ## Catalog
 
@@ -63,7 +66,7 @@ Availability, `priceRange` (inclusive minimum variant price), and categories on 
 
 `filters.availability` keeps a product only when its mapped status is in the requested set. `in_stock` and `backorder` are not both `available: true`. A categories filter matches `product_type` or tag and is not appended to the caller search text. `availability.quantity` sums `quantityAvailable` across variant pages and is omitted when any variant quantity is null.
 
-The first catalog call mints a delegate token with `delegateAccessTokenCreate`, limited to the four unauthenticated scopes above, and stores it encrypted in the same SQLite file. Storefront requests send that token as `Shopify-Storefront-Private-Token`. A public Storefront token is not minted, and the delegate token is not returned to the agent. Saving a new Admin token clears the delegate; the next catalog call mints another.
+The first catalog call mints a delegate token with `delegateAccessTokenCreate`, limited to the four `unauthenticated_*` scopes above, and stores it encrypted in the same SQLite file. Storefront requests send that token as `Shopify-Storefront-Private-Token`. A public Storefront token is not minted, and the delegate token is not returned to the agent. Saving a new Admin token clears the delegate; the next catalog call mints another.
 
 When the FastBuyJSON request's TCP peer is a public address, it is forwarded as `Shopify-Storefront-Buyer-IP`. A loopback peer omits that header. `127.0.0.1` is not sent.
 
@@ -119,9 +122,21 @@ Storefront API **2026-10** `CartDeliveryOption` has `code`, `deliveryMethodType`
 
 Shopify **429** or `THROTTLED` waits once, retries that call once, then returns **429** `RATE_LIMITED`. Responses and logs omit `key=`, Shopify cart and line GIDs, `checkoutUrl`, session tokens, and payment fields.
 
-## Still deferred
+## Order status
 
-- Order status
+`GET /api/fastbuyjson/orders/{orderId}` reads one order from the Admin API at the pinned version in `src/api-version.ts`. The API pin stays `2026-10`. There is no list route, no order webhook, and `confirmCreatesOrder` stays `false`. A Bearer token is ignored. Every response, including errors, sends `Cache-Control: no-store`.
+
+The id is a path segment of 1 to 40 characters. A `gid://shopify/Order/<digits>` value calls `order(id:)`. Digits, or digits with one leading `#`, try `orders(first: 2)` with `name:"#<digits>"` and use that order when exactly one node comes back. Zero nodes then tries the legacy id `gid://shopify/Order/<digits>`. Any other accepted token (a confirmation number, or a name such as `EN1001`) queries `name:"<value>" OR name:"#<value>" OR confirmation_number:"<value>"` with `first: 2`. `orderByIdentifier` is not used. Zero matches, more than one match, an order outside the `read_orders` window, or a token this phase does not accept is **404** `ORDER_NOT_FOUND`. The detail does not say which of those it was.
+
+`order.id` is the client token with one leading `#` removed, except a GID lookup or a legacy id resolved through `order(id:)`. Those use the order `name` with one leading `#` removed. The body never contains `gid://`.
+
+Status uses the first match: `cancelledAt` is `cancelled`, `REFUNDED` is `refunded`, `FULFILLED` is `shipped`, paid and unfulfilled (`UNFULFILLED`, `OPEN`, or `RESTOCKED`) is `confirmed`, and anything else is `processing`. `PARTIALLY_REFUNDED` is not `refunded`. A fulfilled partial refund stays `shipped`, and its `payment.status` is `approved`. `PARTIALLY_FULFILLED` is `processing`. This phase never returns `delivered`.
+
+Money uses `shopMoney` decimal strings, parsed the same way as the cart. Current totals are preferred, then the original totals. Tax, shipping, and discount are omitted when that bag is null. A missing `shopMoney` on a required amount is **500** `INTERNAL_ERROR`. The connector does not invent `0`.
+
+Line `productId` is the first non-empty of the variant SKU, the line SKU, and the variant legacy id. A line with none of those is left out. `items` may be empty. Addresses and card fragments are not selected and not returned: no `shippingAddress`, `billingAddress`, `lastFourDigits`, or `brand`. `payment` is omitted when `paymentGatewayNames` is empty or `displayFinancialStatus` is null. Otherwise `method` is the first gateway name. Shipment walks `fulfillments` in order, skips `CANCELLED`, `ERROR`, and `FAILURE`, and uses the first remaining tracking number. `estimatedDelivery` is never set.
+
+Shopify **429** or `THROTTLED` waits one second, retries that call once, and then returns **429** `RATE_LIMITED`. Logs may include the HTTP status and the client token when that token is not a GID. A GID lookup is logged as a gid lookup without the GID. Logs omit tokens, addresses, email, phone, names, card data, and every `gid://` string.
 
 ## Run
 

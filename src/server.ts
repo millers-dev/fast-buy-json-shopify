@@ -15,6 +15,7 @@ import {
   isWebhookPath,
 } from "./http-auth.js";
 import { writeJson, writeProblem, writeUnexpected } from "./http-response.js";
+import { handleOrder, matchOrderRequest } from "./orders.js";
 import { PRODUCTS_SEARCH_PATH, handleProductSearch } from "./product-search.js";
 import { handleShipping, matchShippingRequest } from "./shipping.js";
 import { internalError } from "./problems.js";
@@ -127,6 +128,22 @@ async function route(
       return;
     }
     await handleShipping(req, res, deps);
+    return;
+  }
+
+  const orderRoute = matchOrderRequest(req.method ?? "GET", pathname);
+  if (orderRoute.match !== "ignore") {
+    if (orderRoute.match === "not-allowed") {
+      req.resume();
+      writeJson(res, 405, { error: "method_not_allowed" }, { Allow: orderRoute.allow, "Cache-Control": "no-store" });
+      return;
+    }
+    if (deps === undefined) {
+      req.resume();
+      writeJson(res, 404, { error: "not_found" }, { "Cache-Control": "no-store" });
+      return;
+    }
+    await handleOrder(req, res, deps, orderRoute.match.orderId);
     return;
   }
 

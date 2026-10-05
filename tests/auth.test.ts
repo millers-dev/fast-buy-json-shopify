@@ -16,7 +16,7 @@ import type { ConnectorDeps } from "../src/deps.js";
 import { buildDetectResponse } from "../src/detect.js";
 import { OauthStateStore } from "../src/oauth-state.js";
 import { DECRYPT_DETAIL, ONE_SHOP_DETAIL, REINSTALL_DETAIL } from "../src/problems.js";
-import { SHOPIFY_SCOPE_PARAM, SHOPIFY_SCOPES } from "../src/scopes.js";
+import { SHOPIFY_SCOPE_PARAM, SHOPIFY_SCOPES, STOREFRONT_SCOPES, hasRequiredScopes } from "../src/scopes.js";
 import { signOauthParams, signWebhookBody } from "../src/shopify-hmac.js";
 import { createConnectorServer, listen } from "../src/server.js";
 import { openConnector } from "../src/startup.js";
@@ -145,7 +145,7 @@ describe("one-shop token store", () => {
 });
 
 describe("OAuth and webhooks", () => {
-  it("sends only the four unauthenticated scopes and does not log the code or token", async () => {
+  it("requests the four unauthenticated scopes plus read_orders and does not log the code or token", async () => {
     await withHarness(async (harness) => {
     const started = await send(harness.base, "/api/shopify/auth");
     assert.equal(started.status, 302);
@@ -154,6 +154,17 @@ describe("OAuth and webhooks", () => {
     assert.equal(location.pathname, "/admin/oauth/authorize");
     assert.deepEqual(location.searchParams.get("scope")?.split(",").sort(), [...SHOPIFY_SCOPES].sort());
     assert.equal(location.searchParams.get("scope"), SHOPIFY_SCOPE_PARAM);
+    assert.deepEqual(STOREFRONT_SCOPES, [
+      "unauthenticated_read_product_listings",
+      "unauthenticated_read_product_inventory",
+      "unauthenticated_read_checkouts",
+      "unauthenticated_write_checkouts",
+    ]);
+    const requested = SHOPIFY_SCOPE_PARAM.split(",");
+    assert.equal(requested.includes("read_orders"), true);
+    assert.equal(requested.includes("write_orders"), false);
+    assert.equal(requested.includes("read_all_orders"), false);
+    assert.equal(hasRequiredScopes(STOREFRONT_SCOPES.join(",")), true);
     assert.equal(location.searchParams.get("client_id"), CLIENT_ID);
     assert.equal(location.searchParams.get("redirect_uri"), `${APP_URL}/api/shopify/auth/callback`);
     assert.equal(location.searchParams.get("client_secret"), null);
