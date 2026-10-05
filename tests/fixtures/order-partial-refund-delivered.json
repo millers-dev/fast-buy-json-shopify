@@ -1,0 +1,122 @@
+{
+  "name": "#1001",
+  "cancelledAt": null,
+  "displayFinancialStatus": "PARTIALLY_REFUNDED",
+  "displayFulfillmentStatus": "FULFILLED",
+  "createdAt": "2025-09-08T12:34:56.789Z",
+  "updatedAt": "2025-09-08T12:45:22.123Z",
+  "paymentGatewayNames": [
+    "shopify_payments"
+  ],
+  "currentSubtotalPriceSet": {
+    "shopMoney": {
+      "amount": "19.99",
+      "currencyCode": "USD"
+    }
+  },
+  "subtotalPriceSet": {
+    "shopMoney": {
+      "amount": "19.99",
+      "currencyCode": "USD"
+    }
+  },
+  "currentTotalTaxSet": null,
+  "totalTaxSet": null,
+  "currentShippingPriceSet": {
+    "shopMoney": {
+      "amount": "10.00",
+      "currencyCode": "USD"
+    }
+  },
+  "totalShippingPriceSet": {
+    "shopMoney": {
+      "amount": "10.00",
+      "currencyCode": "USD"
+    }
+  },
+  "currentTotalDiscountsSet": {
+    "shopMoney": {
+      "amount": "0.00",
+      "currencyCode": "USD"
+    }
+  },
+  "totalDiscountsSet": null,
+  "currentTotalPriceSet": {
+    "shopMoney": {
+      "amount": "29.99",
+      "currencyCode": "USD"
+    }
+  },
+  "totalPriceSet": {
+    "shopMoney": {
+      "amount": "29.99",
+      "currencyCode": "USD"
+    }
+  },
+  "lineItems": {
+    "pageInfo": {
+      "hasNextPage": false,
+      "endCursor": null
+    },
+    "nodes": [
+      {
+        "title": "ACME Wireless Headphones Pro",
+        "quantity": 1,
+        "sku": "variant-sku",
+        "variant": {
+          "sku": "variant-sku",
+          "legacyResourceId": "2001",
+          "selectedOptions": []
+        },
+        "discountedUnitPriceSet": {
+          "shopMoney": {
+            "amount": "19.99",
+            "currencyCode": "USD"
+          }
+        },
+        "originalUnitPriceSet": {
+          "shopMoney": {
+            "amount": "19.99",
+            "currencyCode": "USD"
+          }
+        },
+        "discountedTotalSet": {
+          "shopMoney": {
+            "amount": "19.99",
+            "currencyCode": "USD"
+          }
+        },
+        "originalTotalSet": {
+          "shopMoney": {
+            "amount": "19.99",
+            "currencyCode": "USD"
+          }
+        }
+      }
+    ]
+  },
+  "fulfillments": [
+    {
+      "status": "SUCCESS",
+      "deliveredAt": "2026-01-15T08:30:00.000Z",
+      "trackingInfo": [
+        {
+          "company": "DHL",
+          "number": "TRACK-ONE",
+          "url": "https://track.example/TRACK-ONE"
+        }
+      ]
+    },
+    {
+      "status": "SUCCESS",
+      "deliveredAt": "2026-01-15T08:30:00.000Z",
+      "trackingInfo": [
+        {
+          "company": "UPS",
+          "number": "TRACK-TWO",
+          "url": "https://track.example/TRACK-TWO"
+        }
+      ]
+    }
+  ]
+}

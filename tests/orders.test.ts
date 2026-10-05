@@ -11,6 +11,8 @@ import addFormatsModule from "ajv-formats";
 
 import { SHOPIFY_API_VERSION } from "../src/api-version.js";
 import type { ConnectorDeps } from "../src/deps.js";
+import { mapDisplayStatus } from "../src/order-map.js";
+import { ORDER_BY_ID_DOCUMENT, ORDERS_BY_QUERY_DOCUMENT } from "../src/order-query.js";
 import { SHOPIFY_BACKOFF_MS } from "../src/shopify-graphql.js";
 import { OauthStateStore } from "../src/oauth-state.js";
 import { createConnectorServer, listen } from "../src/server.js";
@@ -306,7 +308,7 @@ describe("GET /api/fastbuyjson/orders/{orderId}", () => {
     assert.equal(email.text.includes("@"), false);
   });
 
-  it("maps status with refunded only for a full refund and never emits delivered", async () => {
+  it("maps refunded only for a full refund and leaves undated fulfillments off delivered", async () => {
     const rows: { financial: string | null; fulfillment: string; cancelledAt?: string; status: string; payment?: string }[] = [
       { financial: "PAID", fulfillment: "UNFULFILLED", status: "confirmed", payment: "approved" },
       { financial: "PAID", fulfillment: "OPEN", status: "confirmed", payment: "approved" },
@@ -346,6 +348,146 @@ describe("GET /api/fastbuyjson/orders/{orderId}", () => {
       } else {
         assert.equal(body.order.payment?.status, row.payment, `${row.financial} ${row.fulfillment}`);
       }
+    }
+  });
+
+  it("selects deliveredAt without truncating fulfillments or reading a second signal", () => {
+    for (const query of [ORDER_BY_ID_DOCUMENT, ORDERS_BY_QUERY_DOCUMENT]) {
+      assertFulfillmentSelection(query);
+    }
+  });
+
+  it("maps delivered only when every active fulfillment has deliveredAt", async () => {
+    const rows: {
+      fixture: string;
+      status: string;
+      payment: string;
+      trackingNumber?: string;
+      absent?: string[];
+    }[] = [
+      {
+        fixture: "order-delivered.json",
+        status: "delivered",
+        payment: "approved",
+        trackingNumber: "TRACK-DELIVERED",
+      },
+      {
+        fixture: "order-fulfilled-delivered-at-null.json",
+        status: "shipped",
+        payment: "approved",
+        trackingNumber: "TRACK-UNDATED",
+        absent: ["delivered"],
+      },
+      {
+        fixture: "order-split-one-delivered-at.json",
+        status: "shipped",
+        payment: "approved",
+        trackingNumber: "TRACK-UNDATED",
+        absent: ["delivered", "TRACK-DATED"],
+      },
+      {
+        fixture: "order-fulfilled-no-fulfillments.json",
+        status: "shipped",
+        payment: "approved",
+        absent: ["delivered"],
+      },
+      {
+        fixture: "order-delivered-cancelled-undated.json",
+        status: "delivered",
+        payment: "approved",
+        trackingNumber: "TRACK-OK",
+        absent: ["TRACK-CANCELLED"],
+      },
+      {
+        fixture: "order-shipped-cancelled-dated.json",
+        status: "shipped",
+        payment: "approved",
+        trackingNumber: "TRACK-UNDATED",
+        absent: ["delivered", "TRACK-CANCELLED"],
+      },
+      {
+        fixture: "order-partially-fulfilled-dated.json",
+        status: "processing",
+        payment: "approved",
+        trackingNumber: "TRACK-PARTIAL",
+        absent: ["delivered"],
+      },
+      {
+        fixture: "order-cancelled-was-delivered.json",
+        status: "cancelled",
+        payment: "approved",
+        trackingNumber: "TRACK-OK",
+        absent: ["delivered"],
+      },
+      {
+        fixture: "order-refunded-was-delivered.json",
+        status: "refunded",
+        payment: "refunded",
+        trackingNumber: "TRACK-OK",
+        absent: ["delivered"],
+      },
+      {
+        fixture: "order-partial-refund-delivered.json",
+        status: "delivered",
+        payment: "approved",
+        trackingNumber: "TRACK-ONE",
+        absent: ["TRACK-TWO"],
+      },
+      {
+        fixture: "order-display-status-ignored.json",
+        status: "shipped",
+        payment: "approved",
+        trackingNumber: "TRACK-UNDATED",
+        absent: ["delivered", "displayStatus", "DELIVERED"],
+      },
+      {
+        fixture: "order-event-status-ignored.json",
+        status: "shipped",
+        payment: "approved",
+        trackingNumber: "TRACK-UNDATED",
+        absent: ["delivered", "DELIVERED"],
+      },
+      {
+        fixture: "order-estimated-delivery-ignored.json",
+        status: "shipped",
+        payment: "approved",
+        trackingNumber: "TRACK-UNDATED",
+        absent: ["delivered", "estimatedDelivery", "2020-01-01", "2019-12-20"],
+      },
+      {
+        fixture: "order-requires-shipping-blocks-delivered.json",
+        status: "shipped",
+        payment: "approved",
+        trackingNumber: "TRACK-SHIP",
+        absent: ["delivered"],
+      },
+    ];
+    for (const row of rows) {
+      calls.length = 0;
+      logs.length = 0;
+      const fixture = loadFixture(row.fixture);
+      script.push(() => jsonResponse(200, asOrders([fixture])));
+      const response = await getOrder(base, "1001");
+      const body = assertOrder(response);
+      assert.equal(body.order.status, row.status, row.fixture);
+      assert.equal(body.order.payment?.status, row.payment, row.fixture);
+      assert.equal(response.text.includes("deliveredAt"), false, row.fixture);
+      assert.equal(response.text.includes(DELIVERED_AT), false, row.fixture);
+      assert.equal(logs.join("\n").includes("deliveredAt"), false, row.fixture);
+      assert.equal(logs.join("\n").includes(DELIVERED_AT), false, row.fixture);
+      assert.equal(Object.hasOwn(body, "extensions"), false, row.fixture);
+      if (row.trackingNumber === undefined) {
+        assert.equal(body.order.shipment, undefined, row.fixture);
+      } else {
+        assert.equal(body.order.shipment?.trackingNumber, row.trackingNumber, row.fixture);
+        assert.equal(Object.hasOwn(body.order.shipment ?? {}, "estimatedDelivery"), false, row.fixture);
+      }
+      for (const absent of row.absent ?? []) {
+        assert.equal(response.text.includes(absent), false, `${row.fixture} ${absent}`);
+      }
+      const call = graphqlCall(calls, 0);
+      assert.equal(call.query, ORDERS_BY_QUERY_DOCUMENT);
+      assertFulfillmentSelection(call.query);
     }
   });
 
@@ -573,6 +715,30 @@ describe("GET /api/fastbuyjson/orders/{orderId}", () => {
   });
 });
 
+describe("deliveredAt signal", () => {
+  it("stays shipped when deliveredAt is empty or whitespace", () => {
+    const dated = "2026-01-15T08:30:00.000Z";
+    for (const deliveredAt of ["", "   ", "\n\t", 0]) {
+      assert.equal(
+        mapDisplayStatus(null, "PAID", "FULFILLED", [{ status: "SUCCESS", deliveredAt }]),
+        "shipped",
+        JSON.stringify(deliveredAt),
+      );
+    }
+    assert.equal(
+      mapDisplayStatus(null, "PAID", "FULFILLED", [
+        { status: "SUCCESS", deliveredAt: dated },
+        { status: "SUCCESS", deliveredAt: "" },
+      ]),
+      "shipped",
+    );
+    assert.equal(
+      mapDisplayStatus(null, "PAID", "FULFILLED", [{ status: "SUCCESS", deliveredAt: dated }]),
+      "delivered",
+    );
+  });
+});
+
 describe("orders without a stored token", () => {
   it("returns 404 when the process is not connected to a shop", async () => {
     const detectOnly = createConnectorServer({ implementationVersion: metadata.version, shopDomain: SHOP });
@@ -734,6 +900,23 @@ function assertSafe(text: string): void {
   assert.equal(text.includes("shippingAddress"), false);
   assert.equal(text.includes("billingAddress"), false);
   assert.equal(text.includes("CardPaymentDetails"), false);
+}
+
+const DELIVERED_AT = "2026-01-15T08:30:00.000Z";
+
+function assertFulfillmentSelection(query: string): void {
+  assert.match(query, /fulfillments\s*\{[^]*?\bdeliveredAt\b/);
+  assert.equal(/fulfillments\s*\(/.test(query), false);
+  assert.equal(/\bevents\b/.test(query), false);
+  assert.equal(/\bdisplayStatus\b/.test(query), false);
+  assert.equal(/\bestimatedDeliveryAt\b/.test(query), false);
+  assert.equal(/\binTransitAt\b/.test(query), false);
+  assert.equal(/\boriginAddress\b/.test(query), false);
+  assert.equal(/\blocation\b/.test(query), false);
+  assert.match(query, /trackingInfo\(first: 10\)/);
+  assert.match(query, /\bcompany\b/);
+  assert.match(query, /\bnumber\b/);
+  assert.match(query, /\burl\b/);
 }
 
 function validateSchema(name: string, body: unknown): boolean {

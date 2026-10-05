@@ -24,7 +24,7 @@ export type OrderLookup =
   | { kind: "search"; value: string; responseId: string }
   | { kind: "reject" };
 
-export type OrderStatusName = "confirmed" | "processing" | "shipped" | "cancelled" | "refunded";
+export type OrderStatusName = "confirmed" | "processing" | "shipped" | "delivered" | "cancelled" | "refunded";
 
 type PaymentStatus = "pending" | "approved" | "declined" | "refunded";
 
@@ -125,7 +125,7 @@ export function mapOrder(
   const body: OrderStatusBody = {
     order: {
       id,
-      status: mapDisplayStatus(order.cancelledAt, financial, fulfillment),
+      status: mapDisplayStatus(order.cancelledAt, financial, fulfillment, order.fulfillments),
       items,
       totals,
       created: order.createdAt,
@@ -149,12 +149,16 @@ export function mapDisplayStatus(
   cancelledAt: unknown,
   financial: string | null,
   fulfillment: string | null,
+  fulfillments: unknown,
 ): OrderStatusName {
   if (cancelledAt !== null && cancelledAt !== undefined) {
     return "cancelled";
   }
   if (financial === "REFUNDED") {
     return "refunded";
+  }
+  if (fulfillment === "FULFILLED" && hasDeliveredSignal(fulfillments)) {
+    return "delivered";
   }
   if (fulfillment === "FULFILLED") {
     return "shipped";
@@ -163,6 +167,31 @@ export function mapDisplayStatus(
     return "confirmed";
   }
   return "processing";
+}
+
+function hasDeliveredSignal(fulfillments: unknown): boolean {
+  if (!Array.isArray(fulfillments)) {
+    return false;
+  }
+  let active = 0;
+  for (const fulfillment of fulfillments) {
+    if (!isRecord(fulfillment) || isInactiveFulfillment(fulfillment.status)) {
+      continue;
+    }
+    active += 1;
+    if (!isDeliveredAtSet(fulfillment.deliveredAt)) {
+      return false;
+    }
+  }
+  return active > 0;
+}
+
+function isInactiveFulfillment(status: unknown): boolean {
+  return status === "CANCELLED" || status === "ERROR" || status === "FAILURE";
+}
+
+function isDeliveredAtSet(value: unknown): boolean {
+  return typeof value === "string" && value.trim() !== "";
 }
 
 function clientIdFromToken(clientId: string): string | null {
@@ -414,11 +443,7 @@ function mapShipment(fulfillments: unknown): Shipment | undefined | "invalid" {
     if (!isRecord(fulfillment)) {
       continue;
     }
-    if (
-      fulfillment.status === "CANCELLED" ||
-      fulfillment.status === "ERROR" ||
-      fulfillment.status === "FAILURE"
-    ) {
+    if (isInactiveFulfillment(fulfillment.status)) {
       continue;
     }
     if (!Array.isArray(fulfillment.trackingInfo)) {
