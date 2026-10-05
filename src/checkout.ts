@@ -16,6 +16,7 @@ import {
   CART_DELIVERY_GROUPS_DOCUMENT,
   CART_SELECTED_DELIVERY_OPTIONS_UPDATE_DOCUMENT,
 } from "./checkout-query.js";
+import { MAX_DELIVERY_GROUP_PAGES, readDeliveryGroupPage } from "./delivery-groups.js";
 import type { ConnectorDeps } from "./deps.js";
 import { writeJson, writeProblem } from "./http-response.js";
 import {
@@ -50,7 +51,6 @@ const CONFIRM_PATH = "/api/fastbuyjson/checkout/confirm";
 const NO_STORE = "no-store";
 const HANDOFF = "shopify_hosted";
 const SESSION_TTL_MS = 60 * 60 * 1000;
-const MAX_GROUP_PAGES = 5;
 
 const validateInitiate = compileSchema("checkout-initiate.json");
 const validateConfirm = compileSchema("checkout-confirm.json");
@@ -441,7 +441,7 @@ async function readDeliveryGroups(
 ): Promise<{ kind: "groups"; groups: DeliveryGroup[] } | { kind: "skip" } | { kind: "failure"; result: CheckoutResult }> {
   const groups: DeliveryGroup[] = [];
   let after: string | null = null;
-  for (let page = 0; page < MAX_GROUP_PAGES; page += 1) {
+  for (let page = 0; page < MAX_DELIVERY_GROUP_PAGES; page += 1) {
     const call = await storefront(deps, token, buyerIp, CART_DELIVERY_GROUPS_DOCUMENT, {
       id: shopifyCartId,
       after,
@@ -513,39 +513,21 @@ function readCheckoutMutation(data: unknown, field: string): MutationRead {
 }
 
 function readGroupPage(data: unknown): GroupPage {
-  if (!isRecord(data) || !Object.hasOwn(data, "cart")) {
-    return { kind: "invalid" };
-  }
-  if (data.cart === null) {
-    return { kind: "gone" };
-  }
-  if (!isRecord(data.cart) || !Object.hasOwn(data.cart, "deliveryGroups")) {
-    return { kind: "missing" };
-  }
-  const connection = data.cart.deliveryGroups;
-  if (connection === null) {
-    return { kind: "missing" };
-  }
-  if (!isRecord(connection) || !isRecord(connection.pageInfo) || typeof connection.pageInfo.hasNextPage !== "boolean") {
-    return { kind: "invalid" };
-  }
-  if (!Array.isArray(connection.nodes)) {
-    return { kind: "invalid" };
-  }
-  const endCursor = connection.pageInfo.endCursor;
-  const cursor = typeof endCursor === "string" && endCursor !== "" ? endCursor : null;
-  if (connection.pageInfo.hasNextPage && cursor === null) {
-    return { kind: "invalid" };
-  }
-  const groups: DeliveryGroup[] = [];
-  for (const node of connection.nodes) {
-    const group = readGroup(node);
-    if (group === null) {
+  const page = readDeliveryGroupPage(data, readGroup);
+  switch (page.kind) {
+    case "ok":
+      return { kind: "ok", groups: page.groups, hasNextPage: page.hasNextPage, endCursor: page.endCursor };
+    case "missing":
+      return { kind: "missing" };
+    case "gone":
+      return { kind: "gone" };
+    case "invalid":
       return { kind: "invalid" };
+    default: {
+      const neverPage: never = page;
+      throw new Error(`Unhandled delivery group page: ${String(neverPage)}`);
     }
-    groups.push(group);
   }
-  return { kind: "ok", groups, hasNextPage: connection.pageInfo.hasNextPage, endCursor: cursor };
 }
 
 function readGroup(value: unknown): DeliveryGroup | null {

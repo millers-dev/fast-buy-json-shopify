@@ -1,0 +1,34 @@
+{
+  "data": {
+    "cart": {
+      "cost": {
+        "totalAmount": {
+          "amount": "30.00",
+          "currencyCode": "EUR"
+        }
+      },
+      "deliveryGroups": {
+        "pageInfo": {
+          "hasNextPage": false,
+          "endCursor": null
+        },
+        "nodes": [
+          {
+            "deliveryOptions": [
+              {
+                "handle": "shop-freight",
+                "title": "Freight",
+                "description": "Pallet",
+                "deliveryMethodType": "SHIPPING",
+                "estimatedCost": {
+                  "amount": "20.00",
+                  "currencyCode": "EUR"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

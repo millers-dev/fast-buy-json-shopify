@@ -1,3 +1,5 @@
+import { DELIVERY_GROUP_PAGE_SIZE } from "./delivery-groups.js";
+
 /** Checkout mutations. checkoutUrl is not selected here. */
 
 export const CART_BUYER_IDENTITY_UPDATE_DOCUMENT = `
@@ -20,7 +22,7 @@ mutation CartDeliveryAddressesReplace($cartId: ID!, $addresses: [CartSelectableA
 export const CART_DELIVERY_GROUPS_DOCUMENT = `
 query CartDeliveryGroups($id: ID!, $after: String) {
   cart(id: $id) {
-    deliveryGroups(first: 20, after: $after) {
+    deliveryGroups(first: ${DELIVERY_GROUP_PAGE_SIZE}, after: $after) {
       pageInfo { hasNextPage endCursor }
       nodes {
         id

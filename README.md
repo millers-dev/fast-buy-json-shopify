@@ -4,7 +4,7 @@ This repository is the Shopify store connector for [FastBuyJSON](https://github.
 
 FastBuyJSON itself — the contract, the Node and Python reference servers, the TypeScript SDK, and the stdio MCP server — stays in `millers-dev/fast-buy-json`. Point that MCP server at this process with `FASTBUYJSON_API_URL=http://localhost:3100/api/fastbuyjson`. This package is not part of that repository and it is not published to npm.
 
-It is early. The accepted plan is `docs/SHOPIFY_PLAN.md` in `millers-dev/fast-buy-json`. This tree implements discovery, one-shop OAuth, catalog search, an anonymous cart, one discount code, and hosted checkout handoff.
+It is early. The accepted plan is `docs/SHOPIFY_PLAN.md` in `millers-dev/fast-buy-json`. This tree implements discovery, one-shop OAuth, catalog search, an anonymous cart, one discount code, hosted checkout handoff, and shipping-option discovery.
 
 ## What v1 does
 
@@ -51,7 +51,7 @@ The Admin access token and refresh token are encrypted with `TOKEN_ENCRYPTION_KE
 
 `app/uninstalled` and `shop/redact` are HMAC-checked and delete that shop row. `customers/data_request` and `customers/redact` are HMAC-checked, acknowledged, and do not build a customer archive. Point them at `{APP_URL}/api/shopify/webhooks/<topic>` (slashes in the topic become path segments) or at `{APP_URL}/api/shopify/webhooks` and let `X-Shopify-Topic` select the handler.
 
-When a stored token must be refreshed before a commerce call and the refresh fails, the cached access token is cleared and the call returns **500** `INTERNAL_ERROR`. The body says the shop must be reinstalled and does not contain a token. Shipping options and orders are not implemented, so those routes stay **404** while the stored token is usable.
+When a stored token must be refreshed before a commerce call and the refresh fails, the cached access token is cleared and the call returns **500** `INTERNAL_ERROR`. The body says the shop must be reinstalled and does not contain a token. Order status is not implemented, so `GET /orders/{orderId}` stays **404** while the stored token is usable.
 
 ## Catalog
 
@@ -107,9 +107,20 @@ A **200** body has `sessionToken`, `verificationToken` (random UUIDs), `expiresA
 
 `Idempotency-Key` on both routes uses the anonymous scope, the contract fingerprint, and 24-hour retention. **4xx** and **5xx** do not store the key. `app/uninstalled` and `shop/redact` delete the session with the shop, the cart, and idempotency rows.
 
+## Shipping
+
+`GET /shipping/options` reads the same anonymous cart. There is no request body. `Idempotency-Key` is not honored. A success body sends `Cache-Control: no-store`.
+
+No local cart is **200** with `options: []` and the shop currency from Storefront `shop.paymentSettings.currencyCode`. It is not **404** `CART_NOT_FOUND`. A cart with no delivery groups yet is **200** with `options: []` and the cart cost currency (`cost.totalAmount.currencyCode`). Currency is not hardcoded.
+
+When delivery groups exist, the connector reads `deliveryGroups` in pages of 20 and stops after 5 pages. Each option’s `handle` would be `id`, `title` would be `label`, and `estimatedCost` would be `amount` through the same decimal money helper as the cart. `description` is copied only when Shopify sends a non-empty string. `freeOver` is never invented, and `standard` / `express` are not seeded.
+
+Storefront API **2026-10** `CartDeliveryOption` has `code`, `deliveryMethodType`, `description`, `estimatedCost`, `handle`, and `title`. It has no day-bound field. `minEstimatedDeliveryDate` and `maxEstimatedDeliveryDate` exist on unstable and are not selected. The pin stays `2026-10`. An option is included only when the payload already has non-negative integer `minDays` and `maxDays`. Titles and descriptions are not turned into a range. On this pin a cart with delivery groups therefore returns `options: []` and `omittedOptionCount` equal to the number of Shopify options seen, including local pickup and duplicate handles. `omittedOptionCount` is omitted when that count is zero. Duplicate handles that can be included are kept once, the first includable option. Group GIDs are not selected and are not returned.
+
+Shopify **429** or `THROTTLED` waits once, retries that call once, then returns **429** `RATE_LIMITED`. Responses and logs omit `key=`, Shopify cart and line GIDs, `checkoutUrl`, session tokens, and payment fields.
+
 ## Still deferred
 
-- Shipping options (`GET /shipping/options`)
 - Order status
 
 ## Run

@@ -904,8 +904,6 @@ describe("POST /api/fastbuyjson/products/search", () => {
       const problem = (await response.json()) as { code?: string };
       assert.equal(problem.code, "VALIDATION_ERROR");
     }
-    const shipping = await fetch(`${base}/api/fastbuyjson/shipping/options`);
-    assert.equal(shipping.status, 404);
     const detect = await fetch(`${base}/api/fastbuyjson/detect`);
     assert.equal(detect.status, 200);
     assert.equal(detect.headers.get("cache-control"), "public, max-age=300");
