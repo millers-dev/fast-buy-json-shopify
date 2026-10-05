@@ -5,6 +5,11 @@
  * `orderByIdentifier` accepts `id` and `customId` only, so this phase does not call it.
  * Amounts are `MoneyBag.shopMoney.amount` (a decimal string) and `currencyCode`.
  * Tracking is `Fulfillment.trackingInfo` `company`, `number`, and `url`.
+ * `Fulfillment.deliveredAt` is a nullable DateTime: the date that fulfillment was delivered.
+ * `Order.fulfillments` is `[Fulfillment!]!`. `first` truncates that list and is not passed.
+ * `Fulfillment.status` is `SUCCESS`, `CANCELLED`, `ERROR`, `FAILURE`, plus deprecated `OPEN` and `PENDING`.
+ * The selection does not read `events`, `displayStatus`, `estimatedDeliveryAt`, `inTransitAt`,
+ * `originAddress`, or `location`.
  * Line prices are `discountedUnitPriceSet` / `originalUnitPriceSet` and
  * `discountedTotalSet` / `originalTotalSet`.
  * The selection set does not read addresses, email, phone, customer name, or
@@ -12,7 +17,6 @@
  */
 
 export const ORDER_LINE_PAGE = 50;
-export const ORDER_FULFILLMENT_CAP = 50;
 export const ORDER_TRACKING_CAP = 10;
 
 const ORDER_FIELDS = `
@@ -50,8 +54,9 @@ const ORDER_FIELDS = `
         originalTotalSet { shopMoney { amount currencyCode } }
       }
     }
-    fulfillments(first: ${ORDER_FULFILLMENT_CAP}) {
+    fulfillments {
       status
+      deliveredAt
       trackingInfo(first: ${ORDER_TRACKING_CAP}) {
         company
         number
