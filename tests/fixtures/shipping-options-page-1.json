@@ -1,0 +1,68 @@
+{
+  "data": {
+    "cart": {
+      "cost": {
+        "totalAmount": {
+          "amount": "30.00",
+          "currencyCode": "EUR"
+        }
+      },
+      "deliveryGroups": {
+        "pageInfo": {
+          "hasNextPage": true,
+          "endCursor": "group-cursor-2"
+        },
+        "nodes": [
+          {
+            "deliveryOptions": [
+              {
+                "handle": "shop-standard",
+                "title": "Ground",
+                "description": "Delivered in 3–5 business days",
+                "deliveryMethodType": "SHIPPING",
+                "estimatedCost": {
+                  "amount": "4.90",
+                  "currencyCode": "EUR"
+                }
+              },
+              {
+                "handle": "shop-express",
+                "title": "Express",
+                "description": null,
+                "deliveryMethodType": "SHIPPING",
+                "estimatedCost": {
+                  "amount": "12.50",
+                  "currencyCode": "EUR"
+                }
+              },
+              {
+                "handle": "shop-pickup",
+                "title": "Store pickup",
+                "description": "",
+                "deliveryMethodType": "PICK_UP",
+                "estimatedCost": {
+                  "amount": "0.00",
+                  "currencyCode": "EUR"
+                }
+              }
+            ]
+          },
+          {
+            "deliveryOptions": [
+              {
+                "handle": "shop-standard",
+                "title": "Ground",
+                "description": "Same rate",
+                "deliveryMethodType": "SHIPPING",
+                "estimatedCost": {
+                  "amount": "4.90",
+                  "currencyCode": "EUR"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

@@ -16,6 +16,7 @@ import {
 } from "./http-auth.js";
 import { writeJson, writeProblem, writeUnexpected } from "./http-response.js";
 import { PRODUCTS_SEARCH_PATH, handleProductSearch } from "./product-search.js";
+import { handleShipping, matchShippingRequest } from "./shipping.js";
 import { internalError } from "./problems.js";
 
 export const DEFAULT_PORT = 3100;
@@ -110,6 +111,22 @@ async function route(
       return;
     }
     await handleCheckout(req, res, deps, checkoutRoute.match);
+    return;
+  }
+
+  const shippingRoute = matchShippingRequest(req.method ?? "GET", pathname);
+  if (shippingRoute.match !== "ignore") {
+    if (shippingRoute.match === "not-allowed") {
+      req.resume();
+      writeJson(res, 405, { error: "method_not_allowed" }, { Allow: shippingRoute.allow, "Cache-Control": "no-store" });
+      return;
+    }
+    if (deps === undefined) {
+      req.resume();
+      writeJson(res, 404, { error: "not_found" }, { "Cache-Control": "no-store" });
+      return;
+    }
+    await handleShipping(req, res, deps);
     return;
   }
 

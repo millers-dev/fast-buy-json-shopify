@@ -1,0 +1,28 @@
+{
+  "data": {
+    "cart": {
+      "cost": {
+        "totalAmount": {
+          "amount": "30.00",
+          "currencyCode": "EUR"
+        }
+      },
+      "deliveryGroups": {
+        "pageInfo": {
+          "hasNextPage": false,
+          "endCursor": null
+        },
+        "nodes": [
+          {
+            "id": "gid://shopify/CartDeliveryGroup/g1",
+            "deliveryOptions": [
+              {
+                "title": "Ground"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

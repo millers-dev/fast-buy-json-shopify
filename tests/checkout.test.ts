@@ -653,8 +653,6 @@ describe("hosted Shopify checkout", { concurrency: false }, () => {
     const method = await request(base, "GET", "/api/fastbuyjson/checkout/initiate");
     assert.equal(method.status, 405);
     assert.equal(method.headers.get("allow"), "POST");
-    const shipping = await request(base, "GET", "/api/fastbuyjson/shipping/options");
-    assert.equal(shipping.status, 404);
     const orders = await request(base, "GET", "/api/fastbuyjson/orders/ord-1");
     assert.equal(orders.status, 404);
   });
