@@ -179,7 +179,7 @@ function hasDeliveredSignal(fulfillments: unknown): boolean {
       continue;
     }
     active += 1;
-    if (fulfillment.deliveredAt === null || fulfillment.deliveredAt === undefined) {
+    if (!isDeliveredAtSet(fulfillment.deliveredAt)) {
       return false;
     }
   }
@@ -188,6 +188,10 @@ function hasDeliveredSignal(fulfillments: unknown): boolean {
 
 function isInactiveFulfillment(status: unknown): boolean {
   return status === "CANCELLED" || status === "ERROR" || status === "FAILURE";
+}
+
+function isDeliveredAtSet(value: unknown): boolean {
+  return typeof value === "string" && value.trim() !== "";
 }
 
 function clientIdFromToken(clientId: string): string | null {

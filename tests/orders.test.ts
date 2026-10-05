@@ -11,6 +11,7 @@ import addFormatsModule from "ajv-formats";
 
 import { SHOPIFY_API_VERSION } from "../src/api-version.js";
 import type { ConnectorDeps } from "../src/deps.js";
+import { mapDisplayStatus } from "../src/order-map.js";
 import { ORDER_BY_ID_DOCUMENT, ORDERS_BY_QUERY_DOCUMENT } from "../src/order-query.js";
 import { SHOPIFY_BACKOFF_MS } from "../src/shopify-graphql.js";
 import { OauthStateStore } from "../src/oauth-state.js";
@@ -307,7 +308,7 @@ describe("GET /api/fastbuyjson/orders/{orderId}", () => {
     assert.equal(email.text.includes("@"), false);
   });
 
-  it("maps status with refunded only for a full refund and never emits delivered", async () => {
+  it("maps refunded only for a full refund and leaves undated fulfillments off delivered", async () => {
     const rows: { financial: string | null; fulfillment: string; cancelledAt?: string; status: string; payment?: string }[] = [
       { financial: "PAID", fulfillment: "UNFULFILLED", status: "confirmed", payment: "approved" },
       { financial: "PAID", fulfillment: "OPEN", status: "confirmed", payment: "approved" },
@@ -711,6 +712,30 @@ describe("GET /api/fastbuyjson/orders/{orderId}", () => {
     assert.equal(discover.capabilities.checkout.confirmCreatesOrder, false);
     assert.deepEqual(discover.authentication, { methods: ["anonymous"] });
     assert.equal(Object.hasOwn(discover, "auth"), false);
+  });
+});
+
+describe("deliveredAt signal", () => {
+  it("stays shipped when deliveredAt is empty or whitespace", () => {
+    const dated = "2026-01-15T08:30:00.000Z";
+    for (const deliveredAt of ["", "   ", "\n\t", 0]) {
+      assert.equal(
+        mapDisplayStatus(null, "PAID", "FULFILLED", [{ status: "SUCCESS", deliveredAt }]),
+        "shipped",
+        JSON.stringify(deliveredAt),
+      );
+    }
+    assert.equal(
+      mapDisplayStatus(null, "PAID", "FULFILLED", [
+        { status: "SUCCESS", deliveredAt: dated },
+        { status: "SUCCESS", deliveredAt: "" },
+      ]),
+      "shipped",
+    );
+    assert.equal(
+      mapDisplayStatus(null, "PAID", "FULFILLED", [{ status: "SUCCESS", deliveredAt: dated }]),
+      "delivered",
+    );
   });
 });
 
