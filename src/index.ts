@@ -1,10 +1,8 @@
 import { pathToFileURL } from "node:url";
 
 import {
-  customerAccountsEnabled,
   loadConfig,
   loadShopifyAuth,
-  orderAddressGateEnabled,
   readCustomerSubSecret,
   readJwtSecret,
   readPort,
@@ -28,18 +26,12 @@ export function start(env: NodeJS.ProcessEnv = process.env): void {
   });
 }
 
-/** Copies `SHOPIFY_ORDER_ADDRESS_GATE` onto deps. `boot` calls this after the token store opens. */
-export function applyOrderAddressGate(deps: ConnectorDeps, env: NodeJS.ProcessEnv): void {
-  deps.orderAddressGate = orderAddressGateEnabled(env.SHOPIFY_ORDER_ADDRESS_GATE);
-}
-
 /**
- * Copies customer-login settings onto deps. While `SHOPIFY_CUSTOMER_ACCOUNTS`
- * is off, orders stay anonymous and `/detect` does not advertise auth.
- * While it is on, `GET /orders/{orderId}` requires the FastBuyJSON JWT.
+ * Copies customer-login settings onto deps. Customer mode is always on:
+ * `GET /orders/{orderId}` requires the FastBuyJSON JWT. `SHOPIFY_CUSTOMER_ACCOUNTS`
+ * and `SHOPIFY_ORDER_ADDRESS_GATE` are not read.
  */
 export function applyCustomerAccounts(deps: ConnectorDeps, env: NodeJS.ProcessEnv): void {
-  deps.customerAccounts = customerAccountsEnabled(env.SHOPIFY_CUSTOMER_ACCOUNTS);
   deps.trustedProxyHops = readTrustedProxyHops(env.SHOPIFY_TRUSTED_PROXY_HOPS);
   const subSecret = readCustomerSubSecret(env.SHOPIFY_CUSTOMER_SUB_SECRET);
   if (subSecret !== undefined) {
@@ -59,7 +51,6 @@ async function boot(
 ): Promise<void> {
   const deps = auth === undefined ? undefined : await openConnector(auth);
   if (deps !== undefined) {
-    applyOrderAddressGate(deps, env);
     applyCustomerAccounts(deps, env);
   }
   const server = createConnectorServer(config, deps);

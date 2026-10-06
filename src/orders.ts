@@ -12,24 +12,13 @@ import type { ConnectorDeps } from "./deps.js";
 import { writeJson, writeProblem } from "./http-response.js";
 import { isRecord } from "./json.js";
 import {
-  classifyOrderToken,
   mapMailingAddress,
   mapOrder,
   type IdMode,
   type OrderLookup,
   type OrderStatusBody,
 } from "./order-map.js";
-import {
-  ORDER_BY_ID_ADDRESS_DOCUMENT,
-  ORDER_BY_ID_DOCUMENT,
-  ORDER_BY_ID_OWNER_ADDRESS_DOCUMENT,
-  ORDERS_BY_QUERY_ADDRESS_DOCUMENT,
-  ORDERS_BY_QUERY_DOCUMENT,
-  legacyOrderGid,
-  nameSearchQuery,
-  tokenSearchQuery,
-  type OrderAddressRead,
-} from "./order-query.js";
+import { ORDER_BY_ID_DOCUMENT, ORDER_BY_ID_OWNER_ADDRESS_DOCUMENT, type OrderAddressRead } from "./order-query.js";
 import { DECRYPT_DETAIL, REINSTALL_DETAIL, internalError, orderNotFound, rateLimited, type Problem } from "./problems.js";
 import { adminGraphqlUrl, defaultSleep, orderAdminGraphql, type OrderAdminCall } from "./shopify-graphql.js";
 import { TokenDecryptError } from "./token-store.js";
@@ -40,7 +29,6 @@ const MAX_LINE_PAGES = 20;
 const NO_STORE = { "Cache-Control": "no-store" };
 
 const validateOrderStatus = compileOrderSchema();
-const validateEmail = compileEmailFormat();
 
 type OrderMatch = { orderId: string };
 
@@ -61,9 +49,6 @@ type SearchHit =
 
 type LineConnection = { nodes: unknown[]; hasNextPage: boolean; endCursor: string | null };
 
-/** Anonymous reads. Owned orders use `order(id:)` and do not search. */
-type GateRead = Exclude<OrderAddressRead, "owner">;
-
 export function matchOrderRequest(
   method: string,
   pathname: string,
@@ -81,32 +66,19 @@ export function matchOrderRequest(
   return { match: { orderId } };
 }
 
+/**
+ * Customer mode is the only order behavior. A missing `Authorization` header
+ * is **401** `AUTHENTICATION_REQUIRED`. Addresses are mapped for the owner.
+ * `?email=` is not read.
+ */
 export async function handleOrder(
   req: IncomingMessage,
   res: ServerResponse,
   deps: ConnectorDeps,
   orderId: string,
-  url: URL,
 ): Promise<void> {
   req.resume();
-  if (deps.customerAccounts === true) {
-    await handleCustomerOrder(req, res, deps, orderId);
-    return;
-  }
-  const lookup = classifyOrderToken(orderId);
-  if (lookup.kind === "reject") {
-    finish(res, orderNotFound(), orderId, lookup);
-    return;
-  }
-  const admin = await readAdminToken(deps);
-  if (!admin.ok) {
-    finish(res, admin.problem, orderId, lookup);
-    return;
-  }
-  const addressRead: GateRead = deps.orderAddressGate === true ? "gate" : "off";
-  const presentedEmail = addressRead === "gate" ? singleQueryEmail(url) : undefined;
-  const loaded = await loadOrder(deps, admin.token, lookup, addressRead, presentedEmail);
-  await writeOrderResult(res, loaded, orderId, lookup, false);
+  await handleCustomerOrder(req, res, deps, orderId);
 }
 
 async function handleCustomerOrder(
@@ -117,16 +89,16 @@ async function handleCustomerOrder(
 ): Promise<void> {
   const owned = await resolveCustomerOwnership(req, deps, orderId);
   if (owned.kind === "problem") {
-    finish(res, owned.problem, orderId, owned.lookup, owned.headers, true);
+    finish(res, owned.problem, orderId, owned.lookup, owned.headers);
     return;
   }
   const admin = await readAdminToken(deps);
   if (!admin.ok) {
-    finish(res, admin.problem, orderId, owned.lookup, {}, true);
+    finish(res, admin.problem, orderId, owned.lookup);
     return;
   }
-  const loaded = await loadByOwnedGid(deps, admin.token, owned.gid, owned.idMode, owned.clientId, "owner");
-  await writeOrderResult(res, loaded, orderId, owned.lookup, true);
+  const loaded = await loadByOwnedGid(deps, admin.token, owned.gid, owned.idMode, owned.clientId);
+  await writeOrderResult(res, loaded, orderId, owned.lookup);
 }
 
 async function writeOrderResult(
@@ -134,31 +106,30 @@ async function writeOrderResult(
   loaded: LoadResult,
   orderId: string,
   lookup: OrderLookup,
-  customerAccounts: boolean,
 ): Promise<void> {
   switch (loaded.kind) {
     case "ok":
       if (!validateOrderStatus(loaded.body)) {
-        finish(res, internalError("The order response could not be completed."), orderId, lookup, {}, customerAccounts);
+        finish(res, internalError("The order response could not be completed."), orderId, lookup);
         return;
       }
-      logOrder(200, orderId, lookup, customerAccounts);
+      logOrder(200, orderId, lookup);
       writeJson(res, 200, loaded.body, NO_STORE);
       return;
     case "not_found":
-      finish(res, orderNotFound(), orderId, lookup, {}, customerAccounts);
+      finish(res, orderNotFound(), orderId, lookup);
       return;
     case "throttled":
-      finish(res, rateLimited("Shopify throttled the order request."), orderId, lookup, {}, customerAccounts);
+      finish(res, rateLimited("Shopify throttled the order request."), orderId, lookup);
       return;
     case "reinstall":
-      finish(res, internalError(REINSTALL_DETAIL), orderId, lookup, {}, customerAccounts);
+      finish(res, internalError(REINSTALL_DETAIL), orderId, lookup);
       return;
     case "failed":
-      finish(res, internalError("The order request could not be completed."), orderId, lookup, {}, customerAccounts);
+      finish(res, internalError("The order request could not be completed."), orderId, lookup);
       return;
     case "invalid":
-      finish(res, internalError("The order response could not be completed."), orderId, lookup, {}, customerAccounts);
+      finish(res, internalError("The order response could not be completed."), orderId, lookup);
       return;
     default: {
       const unexpected: never = loaded;
@@ -167,126 +138,21 @@ async function writeOrderResult(
   }
 }
 
-async function loadOrder(
-  deps: ConnectorDeps,
-  token: string,
-  lookup: Exclude<OrderLookup, { kind: "reject" }>,
-  addressRead: GateRead,
-  presentedEmail: string | undefined,
-): Promise<LoadResult> {
-  switch (lookup.kind) {
-    case "gid":
-      return loadById(deps, token, lookup.gid, addressRead, presentedEmail);
-    case "digits":
-      return loadDigits(deps, token, lookup.digits, lookup.responseId, addressRead, presentedEmail);
-    case "search":
-      return loadSearch(deps, token, lookup.value, lookup.responseId, addressRead, presentedEmail);
-    default: {
-      const unexpected: never = lookup;
-      throw new Error(`Unhandled order lookup: ${String(unexpected)}`);
-    }
-  }
-}
-
-async function loadDigits(
-  deps: ConnectorDeps,
-  token: string,
-  digits: string,
-  responseId: string,
-  addressRead: GateRead,
-  presentedEmail: string | undefined,
-): Promise<LoadResult> {
-  const query = nameSearchQuery(digits);
-  if (query === null) {
-    return { kind: "not_found" };
-  }
-  const hit = await searchOnce(deps, token, query, addressRead);
-  if (hit.kind === "one") {
-    return complete(
-      hit.order,
-      "client",
-      responseId,
-      (after) => searchPage(deps, token, query, after),
-      addressRead,
-      presentedEmail,
-    );
-  }
-  if (hit.kind === "many") {
-    return { kind: "not_found" };
-  }
-  if (hit.kind !== "none") {
-    return { kind: hit.kind };
-  }
-  const gid = legacyOrderGid(digits);
-  if (gid === null) {
-    return { kind: "not_found" };
-  }
-  return loadById(deps, token, gid, addressRead, presentedEmail);
-}
-
-async function loadSearch(
-  deps: ConnectorDeps,
-  token: string,
-  value: string,
-  responseId: string,
-  addressRead: GateRead,
-  presentedEmail: string | undefined,
-): Promise<LoadResult> {
-  const query = tokenSearchQuery(value);
-  if (query === null) {
-    return { kind: "not_found" };
-  }
-  const hit = await searchOnce(deps, token, query, addressRead);
-  if (hit.kind === "one") {
-    return complete(
-      hit.order,
-      "client",
-      responseId,
-      (after) => searchPage(deps, token, query, after),
-      addressRead,
-      presentedEmail,
-    );
-  }
-  if (hit.kind === "none" || hit.kind === "many") {
-    return { kind: "not_found" };
-  }
-  return { kind: hit.kind };
-}
-
-async function loadById(
-  deps: ConnectorDeps,
-  token: string,
-  gid: string,
-  addressRead: GateRead,
-  presentedEmail: string | undefined,
-): Promise<LoadResult> {
-  return loadByOwnedGid(deps, token, gid, "name", "", addressRead, presentedEmail);
-}
-
 async function loadByOwnedGid(
   deps: ConnectorDeps,
   token: string,
   gid: string,
   idMode: IdMode,
   clientId: string,
-  addressRead: OrderAddressRead = "off",
-  presentedEmail?: string,
 ): Promise<LoadResult> {
-  const hit = await orderOnce(deps, token, gid, addressRead);
+  const hit = await orderOnce(deps, token, gid);
   if (hit.kind !== "one") {
     if (hit.kind === "none" || hit.kind === "many") {
       return { kind: "not_found" };
     }
     return { kind: hit.kind };
   }
-  return complete(
-    hit.order,
-    idMode,
-    clientId,
-    (after) => orderPage(deps, token, gid, after),
-    addressRead,
-    presentedEmail,
-  );
+  return complete(hit.order, idMode, clientId, (after) => orderPage(deps, token, gid, after));
 }
 
 async function complete(
@@ -294,8 +160,6 @@ async function complete(
   idMode: IdMode,
   clientId: string,
   nextOrder: (after: string) => Promise<SearchHit>,
-  addressRead: OrderAddressRead,
-  presentedEmail: string | undefined,
 ): Promise<LoadResult> {
   const lines = await collectLines(order, nextOrder);
   if (lines.kind !== "ok") {
@@ -305,48 +169,8 @@ async function complete(
   if (mapped.kind !== "ok") {
     return { kind: "invalid" };
   }
-  if (addressesAttach(addressRead, presentedEmail, order)) {
-    attachAddresses(mapped.body, order);
-  }
+  attachAddresses(mapped.body, order);
   return { kind: "ok", body: mapped.body };
-}
-
-function addressesAttach(
-  addressRead: OrderAddressRead,
-  presentedEmail: string | undefined,
-  order: Record<string, unknown>,
-): boolean {
-  switch (addressRead) {
-    case "off":
-      return false;
-    case "owner":
-      return true;
-    case "gate":
-      return addressGateOpens(presentedEmail, order);
-    default: {
-      const unexpected: never = addressRead;
-      throw new Error(`Unhandled address read: ${String(unexpected)}`);
-    }
-  }
-}
-
-function addressGateOpens(presentedEmail: string | undefined, order: Record<string, unknown>): boolean {
-  if (presentedEmail === undefined) {
-    return false;
-  }
-  const presented = presentedEmail.trim();
-  if (validateEmail(presented) !== true) {
-    return false;
-  }
-  const stored = order.email;
-  if (typeof stored !== "string") {
-    return false;
-  }
-  const expected = stored.trim();
-  if (expected === "") {
-    return false;
-  }
-  return presented.toLowerCase() === expected.toLowerCase();
 }
 
 function attachAddresses(body: OrderStatusBody, order: Record<string, unknown>): void {
@@ -358,14 +182,6 @@ function attachAddresses(body: OrderStatusBody, order: Record<string, unknown>):
   if (billing !== undefined) {
     body.order.billingAddress = billing;
   }
-}
-
-function singleQueryEmail(url: URL): string | undefined {
-  const values = url.searchParams.getAll("email");
-  if (values.length !== 1) {
-    return undefined;
-  }
-  return values[0];
 }
 
 async function collectLines(
@@ -404,75 +220,14 @@ async function collectLines(
   return { kind: "ok", lines };
 }
 
-async function searchOnce(deps: ConnectorDeps, token: string, query: string, addressRead: GateRead): Promise<SearchHit> {
-  const document = ordersQueryDocument(addressRead);
-  const call = await adminCall(deps, token, document, { query, after: null }, addressRead);
-  return hitFromOrders(call);
-}
-
-async function searchPage(deps: ConnectorDeps, token: string, query: string, after: string): Promise<SearchHit> {
-  const call = await adminCall(deps, token, ORDERS_BY_QUERY_DOCUMENT, { query, after }, "off");
-  return hitFromOrders(call);
-}
-
-async function orderOnce(deps: ConnectorDeps, token: string, id: string, addressRead: OrderAddressRead): Promise<SearchHit> {
-  const document = orderDocument(addressRead);
-  const call = await adminCall(deps, token, document, { id, after: null }, addressRead);
+async function orderOnce(deps: ConnectorDeps, token: string, id: string): Promise<SearchHit> {
+  const call = await adminCall(deps, token, ORDER_BY_ID_OWNER_ADDRESS_DOCUMENT, { id, after: null }, "owner");
   return hitFromOrder(call);
 }
 
 async function orderPage(deps: ConnectorDeps, token: string, id: string, after: string): Promise<SearchHit> {
   const call = await adminCall(deps, token, ORDER_BY_ID_DOCUMENT, { id, after }, "off");
   return hitFromOrder(call);
-}
-
-function ordersQueryDocument(addressRead: GateRead): string {
-  switch (addressRead) {
-    case "off":
-      return ORDERS_BY_QUERY_DOCUMENT;
-    case "gate":
-      return ORDERS_BY_QUERY_ADDRESS_DOCUMENT;
-    default: {
-      const unexpected: never = addressRead;
-      throw new Error(`Unhandled address read: ${String(unexpected)}`);
-    }
-  }
-}
-
-function orderDocument(addressRead: OrderAddressRead): string {
-  switch (addressRead) {
-    case "off":
-      return ORDER_BY_ID_DOCUMENT;
-    case "gate":
-      return ORDER_BY_ID_ADDRESS_DOCUMENT;
-    case "owner":
-      return ORDER_BY_ID_OWNER_ADDRESS_DOCUMENT;
-    default: {
-      const unexpected: never = addressRead;
-      throw new Error(`Unhandled address read: ${String(unexpected)}`);
-    }
-  }
-}
-
-function hitFromOrders(call: OrderAdminCall): SearchHit {
-  if (call.kind !== "ok") {
-    return call;
-  }
-  if (!isRecord(call.data) || !isRecord(call.data.orders) || !Array.isArray(call.data.orders.nodes)) {
-    return { kind: "failed" };
-  }
-  const nodes = call.data.orders.nodes;
-  if (nodes.length === 0) {
-    return { kind: "none" };
-  }
-  if (nodes.length > 1) {
-    return { kind: "many" };
-  }
-  const node = nodes[0];
-  if (!isRecord(node)) {
-    return { kind: "failed" };
-  }
-  return { kind: "one", order: node };
 }
 
 function hitFromOrder(call: OrderAdminCall): SearchHit {
@@ -566,15 +321,13 @@ function finish(
   orderId: string,
   lookup: OrderLookup,
   headers: Record<string, string> = {},
-  customerAccounts = false,
 ): void {
-  logOrder(problem.status, orderId, lookup, customerAccounts);
+  logOrder(problem.status, orderId, lookup);
   writeProblem(res, problem, headers);
 }
 
-function logOrder(status: number, orderId: string, lookup: OrderLookup, customerAccounts = false): void {
-  const mode = customerAccounts ? " customer-accounts-on" : "";
-  console.log(`order status ${status} ${orderLogLabel(orderId, lookup)}${mode}`);
+function logOrder(status: number, orderId: string, lookup: OrderLookup): void {
+  console.log(`order status ${status} ${orderLogLabel(orderId, lookup)} customer-accounts-on`);
 }
 
 function orderLogLabel(orderId: string, lookup: OrderLookup): string {
@@ -611,10 +364,4 @@ function compileOrderSchema(): ValidateFunction {
   const ajv = new Ajv({ allErrors: true, strict: false, validateFormats: true });
   addFormatsModule.default(ajv, ["date", "date-time", "uri"]);
   return ajv.compile(schema);
-}
-
-function compileEmailFormat(): ValidateFunction {
-  const ajv = new Ajv({ allErrors: true, strict: false, validateFormats: true });
-  addFormatsModule.default(ajv, ["email"]);
-  return ajv.compile({ type: "string", format: "email" });
 }

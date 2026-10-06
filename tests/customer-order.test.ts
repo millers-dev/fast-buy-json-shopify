@@ -14,7 +14,7 @@ import { CUSTOMER_APP_URL_DETAIL, CUSTOMER_LOGIN_INCOMPLETE_DETAIL, customerSub,
 import { CUSTOMER_USER_AGENT } from "../src/customer-login-shopify.js";
 import type { ConnectorDeps } from "../src/deps.js";
 import { OauthStateStore } from "../src/oauth-state.js";
-import { ORDER_BY_ID_DOCUMENT, ORDER_BY_ID_OWNER_ADDRESS_DOCUMENT, ORDERS_BY_QUERY_ADDRESS_DOCUMENT } from "../src/order-query.js";
+import { ORDER_BY_ID_DOCUMENT, ORDER_BY_ID_OWNER_ADDRESS_DOCUMENT } from "../src/order-query.js";
 import { REINSTALL_DETAIL } from "../src/problems.js";
 import { createConnectorServer, listen } from "../src/server.js";
 import { SHOPIFY_BACKOFF_MS } from "../src/shopify-graphql.js";
@@ -98,10 +98,8 @@ describe("customer-mode GET /orders/{orderId}", () => {
       tokens,
       oauthState: new OauthStateStore(),
       now: () => now,
-      customerAccounts: true,
       customerSubSecret: SUB_SECRET,
       jwtSecret: JWT_SECRET,
-      orderAddressGate: false,
       sleep: async (ms) => {
         sleepDelays.push(ms);
       },
@@ -127,10 +125,8 @@ describe("customer-mode GET /orders/{orderId}", () => {
     sleepDelays.length = 0;
     logs.length = 0;
     now = FIXED_NOW;
-    orderDeps.customerAccounts = true;
     orderDeps.customerSubSecret = SUB_SECRET;
     orderDeps.jwtSecret = JWT_SECRET;
-    orderDeps.orderAddressGate = false;
     orderDeps.app.appUrl = APP_URL;
     tokens.save(sampleToken(), FIXED_NOW);
     tokens.customer.saveSession(SHOP, SUB, CUSTOMER_ACCESS, FIXED_NOW + 3_600_000, GRAPHQL_URL);
@@ -332,8 +328,7 @@ describe("customer-mode GET /orders/{orderId}", () => {
     assert.equal(missing.text.includes("window"), false);
   });
 
-  it("maps addresses when the email does not match and the address gate is on", async () => {
-    orderDeps.orderAddressGate = true;
+  it("maps addresses for the owner and ignores ?email=", async () => {
     script.push(() => jsonResponse(200, loadFixture("customer-orders-one.json")));
     script.push(() => jsonResponse(200, asOrder(loadFixture("order-address-gate.json"))));
     const response = await getOrder(base, "1001", authHeaders(), "email=other@example.com");
@@ -344,7 +339,6 @@ describe("customer-mode GET /orders/{orderId}", () => {
     assert.equal(Object.hasOwn(body.order.payment ?? {}, "brand"), false);
     const admin = graphqlCall(calls, 1);
     assert.equal(admin.query, ORDER_BY_ID_OWNER_ADDRESS_DOCUMENT);
-    assert.notEqual(admin.query, ORDERS_BY_QUERY_ADDRESS_DOCUMENT);
     assert.equal(/\bemail\b/.test(admin.query), false);
     assert.equal(admin.query.includes("CardPaymentDetails"), false);
     assertNoBuyerIdentity(response.text);
@@ -522,41 +516,6 @@ describe("customer-mode GET /orders/{orderId}", () => {
     assertNoBuyerIdentity(JSON.stringify(body));
   });
 
-  it("keeps anonymous order reads when the flag is off", async () => {
-    orderDeps.customerAccounts = false;
-    script.push(() => jsonResponse(200, asOrders([loadFixture("order-admin.json")])));
-    const response = await getOrder(base, "1001", { Authorization: "Bearer demo.jwt.leftover" });
-    const body = assertOrder(response);
-    assert.equal(body.order.id, "1001");
-    assert.equal(body.order.status, "confirmed");
-    assert.equal(calls.length, 1);
-    expectAdmin(graphqlCall(calls, 0));
-    assert.equal(graphqlCall(calls, 0).variables.query, 'name:"#1001"');
-    assert.equal(logs.some((line) => line.includes("customer-accounts-on")), false);
-    assert.equal(response.headers.get("www-authenticate"), null);
-  });
-
-  it("keeps the email gate when customer accounts are off", async () => {
-    orderDeps.customerAccounts = false;
-    orderDeps.orderAddressGate = true;
-    script.push(() => jsonResponse(200, asOrders([loadFixture("order-address-gate.json")])));
-    const opened = assertOrder(await getOrder(base, "1001", { Authorization: "Bearer demo.jwt.leftover" }, "email=buyer@example.com"));
-    assert.deepEqual(opened.order.shippingAddress, SHIPPING);
-    assert.deepEqual(opened.order.billingAddress, BILLING);
-    assert.equal(graphqlCall(calls, 0).query, ORDERS_BY_QUERY_ADDRESS_DOCUMENT);
-    assert.equal(calls.length, 1);
-    assertNoBuyerIdentity(JSON.stringify(opened));
-
-    calls.length = 0;
-    logs.length = 0;
-    script.push(() => jsonResponse(200, asOrders([loadFixture("order-address-gate.json")])));
-    const closed = assertOrder(await getOrder(base, "1001", {}, "email=other@example.com"));
-    assert.equal(Object.hasOwn(closed.order, "shippingAddress"), false);
-    assert.equal(Object.hasOwn(closed.order, "billingAddress"), false);
-    assert.equal(closed.order.id, "1001");
-    assert.equal(JSON.stringify(closed).includes("123 Main St"), false);
-  });
-
   it("asks the buyer to log in again when the session has no Customer Account API URL", async () => {
     tokens.customer.saveSession(SHOP, SUB, CUSTOMER_ACCESS, FIXED_NOW + 3_600_000);
     const response = await getOrder(base, "1001", authHeaders());
@@ -611,10 +570,6 @@ function asOrder(order: unknown): unknown {
   return { data: { order } };
 }
 
-function asOrders(nodes: unknown[]): unknown {
-  return { data: { orders: { nodes } } };
-}
-
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -659,15 +614,6 @@ function expectCustomer(call: GraphqlCall): void {
   assert.equal(call.headers["User-Agent"], CUSTOMER_USER_AGENT);
   assert.equal(call.headers.Origin, APP_URL);
   assert.equal(call.url.includes("myshopify.com"), false);
-}
-
-function expectAdmin(call: GraphqlCall): void {
-  assert.equal(call.url, `https://${SHOP}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`);
-  assert.equal(call.headers["X-Shopify-Access-Token"], ADMIN_TOKEN);
-  assert.equal(/\bshippingAddress\b/.test(call.query), false);
-  assert.equal(/\bbillingAddress\b/.test(call.query), false);
-  assert.equal(/\bemail\b/.test(call.query), false);
-  assert.equal(call.query.includes("CardPaymentDetails"), false);
 }
 
 function expectOwnedAdmin(call: GraphqlCall): void {

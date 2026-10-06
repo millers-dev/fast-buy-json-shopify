@@ -152,7 +152,7 @@ async function route(
       writeJson(res, 404, { error: "not_found" }, { "Cache-Control": "no-store" });
       return;
     }
-    await handleOrder(req, res, deps, orderRoute.match.orderId, url);
+    await handleOrder(req, res, deps, orderRoute.match.orderId);
     return;
   }
 

@@ -51,8 +51,7 @@ type GraphqlArgs = {
   fetch: typeof fetch;
   sleep: (ms: number) => Promise<void>;
   /**
-   * `gate` treats `email` and mailing-address paths as field redaction.
-   * `owner` treats mailing-address paths only. An `email` path is not redaction.
+   * `owner` treats mailing-address paths as field redaction. An `email` path is not redaction.
    * `off` keeps the broader protected-field redaction used when addresses are not selected.
    */
   addressRead?: OrderAddressRead;
@@ -236,10 +235,8 @@ function redactedAddressErrors(errors: unknown, addressRead: OrderAddressRead): 
   switch (addressRead) {
     case "off":
       return errorsAreFieldRedactions(errors);
-    case "gate":
-      return errorsAreAddressPaths(errors, true);
     case "owner":
-      return errorsAreAddressPaths(errors, false);
+      return errorsAreAddressPaths(errors);
     default: {
       const unexpected: never = addressRead;
       throw new Error(`Unhandled address read: ${String(unexpected)}`);
@@ -247,19 +244,19 @@ function redactedAddressErrors(errors: unknown, addressRead: OrderAddressRead): 
   }
 }
 
-function errorsAreAddressPaths(errors: unknown, includeEmail: boolean): boolean {
+function errorsAreAddressPaths(errors: unknown): boolean {
   if (!Array.isArray(errors) || errors.length === 0) {
     return false;
   }
-  return errors.every((error) => isRecord(error) && pathPointsAtAddressField(error.path, includeEmail));
+  return errors.every((error) => isRecord(error) && pathPointsAtAddressField(error.path));
 }
 
-function pathPointsAtAddressField(path: unknown, includeEmail: boolean): boolean {
+function pathPointsAtAddressField(path: unknown): boolean {
   if (!Array.isArray(path) || path.length === 0) {
     return false;
   }
   const last = path[path.length - 1];
-  if ((includeEmail && last === "email") || last === "shippingAddress" || last === "billingAddress") {
+  if (last === "shippingAddress" || last === "billingAddress") {
     return true;
   }
   if (typeof last !== "string" || !ADDRESS_LEAVES.has(last)) {
