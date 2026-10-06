@@ -11,7 +11,9 @@ export type ProblemCode =
   | "INVALID_CHECKOUT_SESSION"
   | "CHECKOUT_SESSION_EXPIRED"
   | "INVALID_VERIFICATION_TOKEN"
-  | "PAYMENT_METHOD_UNSUPPORTED";
+  | "PAYMENT_METHOD_UNSUPPORTED"
+  | "INVALID_TOKEN"
+  | "AUTHENTICATION_REQUIRED";
 
 export type FieldError = {
   field: string;
@@ -32,6 +34,26 @@ export type Problem = {
 export const REINSTALL_DETAIL = "The shop must be reinstalled.";
 export const ONE_SHOP_DETAIL = "This process already stores a token for a different shop.";
 export const DECRYPT_DETAIL = "The token store could not be decrypted.";
+
+export function invalidToken(): Problem {
+  return {
+    type: "https://fastbuyjson.org/problems/invalid-token",
+    title: "Invalid token",
+    status: 401,
+    code: "INVALID_TOKEN",
+    detail: "The token is missing, malformed, or expired.",
+  };
+}
+
+export function authenticationRequired(): Problem {
+  return {
+    type: "https://fastbuyjson.org/problems/authentication-required",
+    title: "Authentication required",
+    status: 401,
+    code: "AUTHENTICATION_REQUIRED",
+    detail: "Sign in to read this order.",
+  };
+}
 
 export function internalError(detail: string): Problem {
   return {

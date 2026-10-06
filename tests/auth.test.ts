@@ -162,8 +162,14 @@ describe("OAuth and webhooks", () => {
     ]);
     const requested = SHOPIFY_SCOPE_PARAM.split(",");
     assert.equal(requested.includes("read_orders"), true);
+    assert.equal(requested.includes("customer_read_orders"), true);
+    assert.equal(requested.includes("customer_read_customers"), true);
     assert.equal(requested.includes("write_orders"), false);
     assert.equal(requested.includes("read_all_orders"), false);
+    assert.equal(requested.includes("read_customers"), false);
+    assert.equal(requested.includes("write_customers"), false);
+    assert.equal(requested.includes("customer_write_orders"), false);
+    assert.equal(requested.includes("customer_write_customers"), false);
     assert.equal(hasRequiredScopes(STOREFRONT_SCOPES.join(",")), true);
     assert.equal(location.searchParams.get("client_id"), CLIENT_ID);
     assert.equal(location.searchParams.get("redirect_uri"), `${APP_URL}/api/shopify/auth/callback`);

@@ -1,6 +1,15 @@
 import { pathToFileURL } from "node:url";
 
-import { loadConfig, loadShopifyAuth, orderAddressGateEnabled, readPort } from "./config.js";
+import {
+  customerAccountsEnabled,
+  loadConfig,
+  loadShopifyAuth,
+  orderAddressGateEnabled,
+  readCustomerSubSecret,
+  readJwtSecret,
+  readPort,
+  readTrustedProxyHops,
+} from "./config.js";
 import type { ConnectorDeps } from "./deps.js";
 import { DEFAULT_PORT, createConnectorServer, listen } from "./server.js";
 import { openConnector } from "./startup.js";
@@ -10,6 +19,8 @@ export function start(env: NodeJS.ProcessEnv = process.env): void {
   const metadata = readPackageMetadata();
   const config = loadConfig(env, metadata.version);
   const port = readPort(env, DEFAULT_PORT);
+  readTrustedProxyHops(env.SHOPIFY_TRUSTED_PROXY_HOPS);
+  readCustomerSubSecret(env.SHOPIFY_CUSTOMER_SUB_SECRET);
   const auth = loadShopifyAuth(env);
   void boot(config, port, auth, env).catch((error: unknown) => {
     console.error(error instanceof Error ? error.message : "failed to start");
@@ -22,6 +33,23 @@ export function applyOrderAddressGate(deps: ConnectorDeps, env: NodeJS.ProcessEn
   deps.orderAddressGate = orderAddressGateEnabled(env.SHOPIFY_ORDER_ADDRESS_GATE);
 }
 
+/**
+ * Copies customer-login settings onto deps. Orders and `/detect` stay as they
+ * are while `SHOPIFY_CUSTOMER_ACCOUNTS` is off. Ownership is a later change.
+ */
+export function applyCustomerAccounts(deps: ConnectorDeps, env: NodeJS.ProcessEnv): void {
+  deps.customerAccounts = customerAccountsEnabled(env.SHOPIFY_CUSTOMER_ACCOUNTS);
+  deps.trustedProxyHops = readTrustedProxyHops(env.SHOPIFY_TRUSTED_PROXY_HOPS);
+  const subSecret = readCustomerSubSecret(env.SHOPIFY_CUSTOMER_SUB_SECRET);
+  if (subSecret !== undefined) {
+    deps.customerSubSecret = subSecret;
+  }
+  const jwtSecret = readJwtSecret(env.JWT_SECRET);
+  if (jwtSecret !== undefined) {
+    deps.jwtSecret = jwtSecret;
+  }
+}
+
 async function boot(
   config: ReturnType<typeof loadConfig>,
   port: number,
@@ -31,6 +59,7 @@ async function boot(
   const deps = auth === undefined ? undefined : await openConnector(auth);
   if (deps !== undefined) {
     applyOrderAddressGate(deps, env);
+    applyCustomerAccounts(deps, env);
   }
   const server = createConnectorServer(config, deps);
   const bound = await listen(server, port);

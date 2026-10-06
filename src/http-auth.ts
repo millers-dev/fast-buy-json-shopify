@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 import { normalizeShopDomain } from "./config.js";
+import { customerGidFromWebhook, customerSub } from "./customer-login-crypto.js";
 import type { ConnectorDeps } from "./deps.js";
 import { verifyOauthHmac, verifyWebhookHmac } from "./shopify-hmac.js";
 import { authorizeUrl, requestAuthorizationCode } from "./shopify-token.js";
@@ -183,11 +184,27 @@ export async function handleWebhook(
     return;
   }
   await deps.tokens.exclusive(async () => {
+    if (topic === "customers/data_request" || topic === "customers/redact") {
+      deleteCustomerSession(deps, body);
+      return;
+    }
     if (webhookDeletesShop(topic)) {
       deps.tokens.deleteShop(deps.app.shopDomain);
     }
   });
   writeJson(res, 200, { ok: true }, noStore);
+}
+
+function deleteCustomerSession(deps: ConnectorDeps, body: Buffer): void {
+  const secret = deps.customerSubSecret;
+  if (secret === undefined) {
+    return;
+  }
+  const gid = customerGidFromWebhook(body);
+  if (gid === null) {
+    return;
+  }
+  deps.tokens.customer.deleteSession(customerSub(secret, gid));
 }
 
 function webhookDeletesShop(topic: WebhookTopic): boolean {

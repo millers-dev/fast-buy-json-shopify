@@ -42,6 +42,8 @@ Requested scopes, and no others:
 - `unauthenticated_read_checkouts`
 - `unauthenticated_write_checkouts`
 - `read_orders`
+- `customer_read_orders`
+- `customer_read_customers`
 
 Two grants:
 
@@ -50,11 +52,13 @@ Two grants:
 
 The Admin access token and refresh token are encrypted with `TOKEN_ENCRYPTION_KEY` and written to `fastbuyjson-shopify.sqlite` in the working directory. That file is gitignored. The store holds one shop. A second shop is rejected until the file is removed. Tokens are not written to logs or HTTP responses.
 
-`app/uninstalled` and `shop/redact` are HMAC-checked and delete that shop row. `customers/data_request` and `customers/redact` are HMAC-checked, acknowledged, and do not build a customer archive. Point them at `{APP_URL}/api/shopify/webhooks/<topic>` (slashes in the topic become path segments) or at `{APP_URL}/api/shopify/webhooks` and let `X-Shopify-Topic` select the handler.
+`app/uninstalled` and `shop/redact` are HMAC-checked and delete that shop row, including any customer session rows. `customers/data_request` and `customers/redact` are HMAC-checked and acknowledged. They do not build a customer archive. Each deletes the session row for `sub`, recomputed from the webhook customer id and `SHOPIFY_CUSTOMER_SUB_SECRET`, and `customers/data_request` exports nothing. Point them at `{APP_URL}/api/shopify/webhooks/<topic>` (slashes in the topic become path segments) or at `{APP_URL}/api/shopify/webhooks` and let `X-Shopify-Topic` select the handler.
 
 When a stored token must be refreshed before a commerce call and the refresh fails, the cached access token is cleared and the call returns **500** `INTERNAL_ERROR`. The body says the shop must be reinstalled and does not contain a token.
 
-`read_orders` is requested on the next install. A token saved before that grant does not gain the scope by itself. Catalog, cart, and checkout keep working on that token. `GET /orders/{orderId}` returns **500** `INTERNAL_ERROR` until the merchant installs again, and that response does not clear the stored token. Still omitted: `write_orders`, `read_all_orders`, `read_customers`, `write_customers`, and any Admin product or draft-order scope. The Storefront delegate token stays limited to the four `unauthenticated_*` scopes. `read_orders` is not delegated.
+`read_orders` and the two `customer_read_*` scopes are requested on the next install. A token saved before that grant does not gain them by itself. Catalog, cart, and checkout keep working on that token. `GET /orders/{orderId}` returns **500** `INTERNAL_ERROR` until the merchant installs again when `read_orders` is missing, and that response does not clear the stored token. Still omitted: `write_orders`, `read_all_orders`, `read_customers`, `write_customers`, `customer_write_orders`, `customer_write_customers`, and any Admin product or draft-order scope. The Storefront delegate token stays limited to the four `unauthenticated_*` scopes. `read_orders` and the customer scopes are not delegated.
+
+`shopify.app.toml` sets `[customer_authentication]`. `redirect_uris` is `{APP_URL}/api/fastbuyjson/auth/customer/callback`. `javascript_origins` is the `APP_URL` origin with no path. The checked-in file uses `https://app.example.com` as that origin; replace it with the real `APP_URL` before deploy. In the Partner Dashboard, declare protected customer data fields Name and Email. Do not declare Address in this phase. Do not declare Phone.
 
 ## Catalog
 
@@ -142,6 +146,18 @@ When the gate is open, `address1`, `address2`, `city`, `province`, `countryCodeV
 
 Shopify **429** or `THROTTLED` waits one second, retries that call once, and then returns **429** `RATE_LIMITED`. Logs may include the HTTP status and the client token when that token is not a GID. A GID lookup is logged as a gid lookup without the GID. Logs omit tokens, addresses, email, phone, names, card data, and every `gid://` string.
 
+## Customer login
+
+`SHOPIFY_CUSTOMER_ACCOUNTS` defaults to off. Off is every value other than trimmed `1` or `true` (any case). While it is off, `GET /orders/{orderId}` stays anonymous, a Bearer token on that route is ignored, and `/detect` does not list `auth`. The login routes below still exist. They are not advertised. Turning the flag on does not yet require a buyer on orders; that check is a later change.
+
+`POST /api/fastbuyjson/auth/customer/start` discovers the shop’s OpenID and Customer Account API documents, then returns `loginUrl`, `pollToken`, `userCode`, and `expiresAt`. `loginUrl` contains `loginId` only. `pollToken` is only in that JSON body. The buyer opens the link, sees the user code, and continues. The callback uses PKCE (`S256`), checks `nonce` on `id_token`, then discards `id_token`. A `refresh_token` in the token response is discarded and is not used. `POST /api/fastbuyjson/auth/customer/poll` with `{ "pollToken" }` returns the FastBuyJSON JWT once (`sub`, `iat`, `exp`) and no refresh token.
+
+`sub` is unpadded base64url HMAC-SHA256 of `gid://shopify/Customer/<digits>`, keyed with `SHOPIFY_CUSTOMER_SUB_SECRET` (at least 32 bytes, or the process refuses to start). The GID is not stored. The customer access token is encrypted in SQLite. `JWT_SECRET` signs the JWT. If either secret is unset, login completion returns **500** `INTERNAL_ERROR` and no JWT.
+
+Start is limited to 10 attempts per client address per 10 minutes and 100 live poll rows. The address is the TCP socket unless `SHOPIFY_TRUSTED_PROXY_HOPS` is a positive integer from 1 to 10. Unset or empty is 0. Any other set value refuses process start (`1abc` is not 1). A positive hop count reads `X-Forwarded-For` from the right, after trimming each entry, and does not fall back to the socket. Poll is at most one request per row per 2 seconds. A `pollToken` in the query string or the poll path is **401** `INVALID_TOKEN`.
+
+The Customer Account API GraphQL call sends `Authorization` set to the customer access token itself (2026-10 authentication docs; not `Bearer`). Token and GraphQL calls send `User-Agent: fast-buy-json-shopify/<version>` and `Origin` set to the `APP_URL` origin. A token-endpoint **403**, or **401** whose `WWW-Authenticate` says `invalid_token`, fails the poll with **500** and a detail that customer login is misconfigured.
+
 ## Run
 
 ```bash
@@ -153,7 +169,7 @@ curl -s http://localhost:3100/api/fastbuyjson/detect
 
 `PORT` defaults to `3100`. Copy `.env.example` for local values. With only `PORT` and `SHOPIFY_SHOP`, the process serves discovery and does not call Shopify.
 
-To store a token, set `SHOPIFY_SHOP`, `SHOPIFY_CLIENT_ID`, `SHOPIFY_CLIENT_SECRET`, and `TOKEN_ENCRYPTION_KEY` (32 bytes, base64). Leave `APP_URL` unset for client credentials. Set `APP_URL` to the public HTTPS origin, then open `http://localhost:3100/api/shopify/auth`, for the authorization-code grant. `SHOPIFY_API_VERSION` must be `2026-10` when it is set. Leave `SHOPIFY_ORDER_ADDRESS_GATE` unset to keep order addresses off. Set it to `1` or `true` to return `shippingAddress` and `billingAddress` when `?email=` matches the order.
+To store a token, set `SHOPIFY_SHOP`, `SHOPIFY_CLIENT_ID`, `SHOPIFY_CLIENT_SECRET`, and `TOKEN_ENCRYPTION_KEY` (32 bytes, base64). Leave `APP_URL` unset for client credentials. Set `APP_URL` to the public HTTPS origin, then open `http://localhost:3100/api/shopify/auth`, for the authorization-code grant. `SHOPIFY_API_VERSION` must be `2026-10` when it is set. Leave `SHOPIFY_ORDER_ADDRESS_GATE` unset to keep order addresses off. Set it to `1` or `true` to return `shippingAddress` and `billingAddress` when `?email=` matches the order. Leave `SHOPIFY_CUSTOMER_ACCOUNTS` unset to keep orders anonymous. `SHOPIFY_CUSTOMER_SUB_SECRET` and `JWT_SECRET` are required only to finish a customer login. `SHOPIFY_TRUSTED_PROXY_HOPS` must be unset, empty, or an integer from 0 to 10.
 
 ```bash
 npm test

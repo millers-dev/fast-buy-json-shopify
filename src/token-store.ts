@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 import initSqlJs, { type Database, type SqlValue } from "sql.js";
 
+import { CustomerAuthStore } from "./customer-auth-store.js";
 import { isRecord } from "./json.js";
 import { decryptSecret, encryptSecret } from "./secret-box.js";
 
@@ -120,13 +121,18 @@ function loadSql(): ReturnType<typeof initSqlJs> {
 }
 
 export class TokenStore {
+  readonly customer: CustomerAuthStore;
   private tail: Promise<void> = Promise.resolve();
 
   private constructor(
     private readonly db: Database,
     private readonly filePath: string,
     private readonly key: Buffer,
-  ) {}
+  ) {
+    this.customer = new CustomerAuthStore(db, key, () => this.persist(), () => {
+      throw new TokenDecryptError();
+    });
+  }
 
   static async open(filePath: string, key: Buffer): Promise<TokenStore> {
     const SQL = await loadSql();
@@ -248,6 +254,7 @@ export class TokenStore {
   }
 
   deleteShop(shopDomain: string): boolean {
+    this.customer.deleteAll();
     this.db.run("DELETE FROM shop_credential WHERE singleton = 1 AND shop_domain = ?", [shopDomain]);
     const deleted = this.db.getRowsModified() === 1;
     this.db.run("DELETE FROM anonymous_cart WHERE singleton = 1 AND shop_domain = ?", [shopDomain]);
