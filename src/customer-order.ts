@@ -1,3 +1,8 @@
+/**
+ * Customer-mode order ownership.
+ * The plan is `docs/SHOPIFY_CUSTOMER_ACCOUNTS_PLAN.md` in millers-dev/fast-buy-json.
+ * That file is not in this repository.
+ */
 import type { IncomingMessage } from "node:http";
 
 import {
@@ -83,16 +88,19 @@ export async function resolveCustomerOwnership(
   if (session === null || session.accessToken === "" || session.expiresAt <= deps.now()) {
     return ownershipProblem(invalidToken(), lookup, WWW_AUTHENTICATE);
   }
+  // Rows minted before ownership stored no Customer Account API URL.
+  // The buyer logs in again. Deleting the row avoids a repeated 500 for a session that cannot call customer.orders.
+  const graphqlApi = session.graphqlApi;
+  if (graphqlApi === null || !httpsCustomerGraphqlUrl(graphqlApi)) {
+    deps.tokens.customer.deleteSession(auth.claims.sub);
+    return ownershipProblem(invalidToken(), lookup, WWW_AUTHENTICATE);
+  }
   if (lookup.kind === "reject") {
     return ownershipProblem(orderNotFound(), lookup, {});
   }
   const origin = deps.app.appUrl;
   if (origin === undefined) {
     return ownershipProblem(internalError(CUSTOMER_APP_URL_DETAIL), lookup, {});
-  }
-  const graphqlApi = session.graphqlApi;
-  if (graphqlApi === null || !httpsCustomerGraphqlUrl(graphqlApi)) {
-    return ownershipProblem(internalError("The order request could not be completed."), lookup, {});
   }
   const owned = await findOwnedOrder(deps, secret, auth.claims.sub, session.accessToken, origin, graphqlApi, lookup);
   switch (owned.kind) {

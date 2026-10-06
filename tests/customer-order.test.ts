@@ -432,6 +432,18 @@ describe("customer-mode GET /orders/{orderId}", () => {
     assert.equal(response.headers.get("www-authenticate"), null);
   });
 
+  it("asks the buyer to log in again when the session has no Customer Account API URL", async () => {
+    tokens.customer.saveSession(SHOP, SUB, CUSTOMER_ACCESS, FIXED_NOW + 3_600_000);
+    const response = await getOrder(base, "1001", authHeaders());
+    assertProblem(response, 401, "INVALID_TOKEN");
+    assert.equal(response.headers.get("www-authenticate"), "Bearer");
+    assert.equal(tokens.customer.countSessions(), 0);
+    assert.equal(tokens.customer.getSession(SHOP, SUB), null);
+    assert.equal(calls.length, 0);
+    assert.equal(response.text.includes("gid://"), false);
+    assert.equal(response.text.includes(CUSTOMER_ACCESS), false);
+  });
+
   it("returns 500 when APP_URL is missing and does not call Shopify", async () => {
     delete orderDeps.app.appUrl;
     const response = await getOrder(base, "1001", authHeaders());
