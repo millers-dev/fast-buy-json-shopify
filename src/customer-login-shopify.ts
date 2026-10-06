@@ -111,7 +111,7 @@ export async function exchangeCustomerCode(args: {
         redirect_uri: args.redirectUri,
         code: args.code,
         code_verifier: args.codeVerifier,
-      }),
+      }).toString(),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   } catch {

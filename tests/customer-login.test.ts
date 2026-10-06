@@ -764,7 +764,7 @@ async function withHarness(
     fetch: async (input, init) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
       const headers = new Headers(init?.headers);
-      const body = typeof init?.body === "string" ? init.body : "";
+      const body = requestBody(init?.body);
       calls.push({ url, headers, body });
       if (url.endsWith("/.well-known/openid-configuration")) {
         if (harness.openidStatus !== 200) {
@@ -922,6 +922,16 @@ function tokenResponse(body: unknown): Response {
   return jsonResponse(200, body);
 }
 
+function requestBody(body: unknown): string {
+  if (typeof body === "string") {
+    return body;
+  }
+  if (body instanceof URLSearchParams) {
+    return body.toString();
+  }
+  return "";
+}
+
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -974,8 +984,9 @@ function header(headers: IncomingHttpHeaders, name: string): string | undefined 
 
 function setCookie(headers: IncomingHttpHeaders): string {
   const value = headers["set-cookie"];
-  assert.equal(typeof value, "string");
-  return typeof value === "string" ? value : "";
+  assert.ok(Array.isArray(value));
+  assert.equal(value.length, 1);
+  return value[0] ?? "";
 }
 
 function cookieValue(headerValue: string): string {
