@@ -1,4 +1,5 @@
 import { isRecord } from "./json.js";
+import type { OrderAddressRead } from "./order-query.js";
 
 /** Shopify's documented retry guidance: wait one second, then try once more. */
 export const SHOPIFY_BACKOFF_MS = 1000;
@@ -49,8 +50,12 @@ type GraphqlArgs = {
   buyerIp?: string;
   fetch: typeof fetch;
   sleep: (ms: number) => Promise<void>;
-  /** When true, only email and mailing-address paths count as field redaction. */
-  addressGate?: boolean;
+  /**
+   * `gate` treats `email` and mailing-address paths as field redaction.
+   * `owner` treats mailing-address paths only. An `email` path is not redaction.
+   * `off` keeps the broader protected-field redaction used when addresses are not selected.
+   */
+  addressRead?: OrderAddressRead;
 };
 
 export async function shopifyGraphql(args: GraphqlArgs): Promise<ShopifyCall> {
@@ -122,7 +127,7 @@ async function orderCallOnce(args: GraphqlArgs): Promise<OrderAdminCall> {
   if (fetched.kind !== "http") {
     return fetched;
   }
-  return classifyOrderPayload(fetched.status, fetched.payload, args.addressGate === true);
+  return classifyOrderPayload(fetched.status, fetched.payload, args.addressRead ?? "off");
 }
 
 async function customerCallOnce(args: CustomerGraphqlArgs): Promise<CustomerAccountCall> {
@@ -205,7 +210,7 @@ async function fetchGraphql(args: GraphqlArgs): Promise<FetchedGraphql> {
 
 const ADDRESS_LEAVES = new Set(["address1", "address2", "city", "province", "countryCodeV2", "zip"]);
 
-function classifyOrderPayload(status: number, payload: unknown, addressGate: boolean): OrderAdminCall {
+function classifyOrderPayload(status: number, payload: unknown, addressRead: OrderAddressRead): OrderAdminCall {
   if (status === 401 || hasRootAccessDenied(payload)) {
     return { kind: "reinstall" };
   }
@@ -218,16 +223,7 @@ function classifyOrderPayload(status: number, payload: unknown, addressGate: boo
   if (!hasErrors(payload)) {
     return { kind: "ok", data: payload.data };
   }
-  if (addressGate) {
-    if (errorsAreAddressGateRedactions(payload.errors) && orderPayloadPopulated(payload.data)) {
-      return { kind: "ok", data: payload.data };
-    }
-    if (hasAccessDenied(payload) && !orderPayloadPopulated(payload.data)) {
-      return { kind: "reinstall" };
-    }
-    return { kind: "failed" };
-  }
-  if (errorsAreFieldRedactions(payload.errors) && orderPayloadPopulated(payload.data)) {
+  if (redactedAddressErrors(payload.errors, addressRead) && orderPayloadPopulated(payload.data)) {
     return { kind: "ok", data: payload.data };
   }
   if (hasAccessDenied(payload) && !orderPayloadPopulated(payload.data)) {
@@ -236,19 +232,34 @@ function classifyOrderPayload(status: number, payload: unknown, addressGate: boo
   return { kind: "failed" };
 }
 
-function errorsAreAddressGateRedactions(errors: unknown): boolean {
+function redactedAddressErrors(errors: unknown, addressRead: OrderAddressRead): boolean {
+  switch (addressRead) {
+    case "off":
+      return errorsAreFieldRedactions(errors);
+    case "gate":
+      return errorsAreAddressPaths(errors, true);
+    case "owner":
+      return errorsAreAddressPaths(errors, false);
+    default: {
+      const unexpected: never = addressRead;
+      throw new Error(`Unhandled address read: ${String(unexpected)}`);
+    }
+  }
+}
+
+function errorsAreAddressPaths(errors: unknown, includeEmail: boolean): boolean {
   if (!Array.isArray(errors) || errors.length === 0) {
     return false;
   }
-  return errors.every((error) => isRecord(error) && pathPointsAtGateField(error.path));
+  return errors.every((error) => isRecord(error) && pathPointsAtAddressField(error.path, includeEmail));
 }
 
-function pathPointsAtGateField(path: unknown): boolean {
+function pathPointsAtAddressField(path: unknown, includeEmail: boolean): boolean {
   if (!Array.isArray(path) || path.length === 0) {
     return false;
   }
   const last = path[path.length - 1];
-  if (last === "email" || last === "shippingAddress" || last === "billingAddress") {
+  if ((includeEmail && last === "email") || last === "shippingAddress" || last === "billingAddress") {
     return true;
   }
   if (typeof last !== "string" || !ADDRESS_LEAVES.has(last)) {
