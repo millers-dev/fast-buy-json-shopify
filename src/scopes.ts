@@ -9,11 +9,19 @@ export const STOREFRONT_SCOPES = [
 /**
  * Scopes requested when the merchant installs the app.
  * `read_orders` is Admin-only (about the last 60 days). It is not a Storefront
- * delegate scope. `write_orders` and `read_all_orders` stay off.
- * An install that already granted the Storefront scopes does not gain
- * `read_orders` until the merchant authorizes again.
+ * delegate scope. `customer_read_orders` and `customer_read_customers` are
+ * Customer Account API scopes, not Admin `read_customers`.
+ * `write_orders`, `read_all_orders`, `read_customers`, `write_customers`,
+ * and `customer_write_*` stay off.
+ * An install that already granted the earlier scopes does not gain the new
+ * ones until the merchant authorizes again.
  */
-export const SHOPIFY_SCOPES = [...STOREFRONT_SCOPES, "read_orders"] as const;
+export const SHOPIFY_SCOPES = [
+  ...STOREFRONT_SCOPES,
+  "read_orders",
+  "customer_read_orders",
+  "customer_read_customers",
+] as const;
 
 export type ShopifyScope = (typeof SHOPIFY_SCOPES)[number];
 

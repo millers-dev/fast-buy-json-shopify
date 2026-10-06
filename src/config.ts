@@ -104,6 +104,58 @@ export function orderAddressGateEnabled(raw: string | undefined): boolean {
   return value === "1" || value === "true";
 }
 
+/**
+ * Customer-account login is on only when the trimmed value is `1` or `true`,
+ * compared case-insensitively. Unset, empty, `0`, `false`, and every other
+ * value are off. Off keeps anonymous orders and does not advertise auth.
+ */
+export function customerAccountsEnabled(raw: string | undefined): boolean {
+  return orderAddressGateEnabled(raw);
+}
+
+/**
+ * Unset or `""` is 0 (socket address, `X-Forwarded-For` ignored).
+ * A set value is trimmed, then accepted only when it matches `^[0-9]+$`
+ * and the integer is 0 through 10. Anything else refuses process start.
+ * This is not `parseInt` (`1abc` is rejected, not treated as 1).
+ */
+export function readTrustedProxyHops(raw: string | undefined): number {
+  if (raw === undefined || raw === "") {
+    return 0;
+  }
+  const trimmed = raw.trim();
+  if (!/^[0-9]+$/.test(trimmed)) {
+    throw new Error("SHOPIFY_TRUSTED_PROXY_HOPS must be an integer from 0 to 10");
+  }
+  const hops = Number(trimmed);
+  if (!Number.isInteger(hops) || hops < 0 || hops > 10) {
+    throw new Error("SHOPIFY_TRUSTED_PROXY_HOPS must be an integer from 0 to 10");
+  }
+  return hops;
+}
+
+/**
+ * UTF-8 HMAC key for the JWT `sub`. Unset or `""` lets the process start.
+ * A set value shorter than 32 bytes refuses process start. The bytes are not trimmed.
+ */
+export function readCustomerSubSecret(raw: string | undefined): string | undefined {
+  if (raw === undefined || raw === "") {
+    return undefined;
+  }
+  if (Buffer.byteLength(raw, "utf8") < 32) {
+    throw new Error("SHOPIFY_CUSTOMER_SUB_SECRET must be at least 32 bytes");
+  }
+  return raw;
+}
+
+/** HS256 key for the FastBuyJSON JWT. Unset or `""` lets the process start. */
+export function readJwtSecret(raw: string | undefined): string | undefined {
+  if (raw === undefined || raw === "") {
+    return undefined;
+  }
+  return raw;
+}
+
 export function readPort(env: NodeJS.ProcessEnv, defaultPort: number): number {
   const raw = env.PORT;
   if (raw === undefined || raw.trim() === "") {

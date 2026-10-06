@@ -15,10 +15,15 @@ export function writeJson(
   res.end(JSON.stringify(body));
 }
 
-export function writeProblem(res: ServerResponse, problem: Problem): void {
+export function writeProblem(
+  res: ServerResponse,
+  problem: Problem,
+  headers: Record<string, string> = {},
+): void {
   res.writeHead(problem.status, {
     "Content-Type": "application/problem+json; charset=utf-8",
     "Cache-Control": "no-store",
+    ...headers,
   });
   res.end(JSON.stringify(problem));
 }

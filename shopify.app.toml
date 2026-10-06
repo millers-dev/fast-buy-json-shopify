@@ -1,0 +1,30 @@
+# FastBuyJSON Shopify connector.
+# Replace https://app.example.com with the APP_URL origin (scheme, host, and port; no path)
+# before `shopify app deploy`. Replace client_id with the Dev Dashboard client id.
+#
+# Protected customer data, Partner Dashboard → API access requests:
+# declare Name and Email (level 2 for Customer Account API login).
+# Do not declare Address in this phase. Do not declare Phone.
+# The HTTP API does not return name, email, or phone.
+
+name = "FastBuyJSON Shopify"
+client_id = "00000000000000000000000000000000"
+application_url = "https://app.example.com"
+embedded = false
+
+[access_scopes]
+scopes = "unauthenticated_read_product_listings,unauthenticated_read_product_inventory,unauthenticated_read_checkouts,unauthenticated_write_checkouts,read_orders,customer_read_orders,customer_read_customers"
+use_legacy_install_flow = true
+
+[auth]
+redirect_urls = [
+  "https://app.example.com/api/shopify/auth/callback"
+]
+
+[customer_authentication]
+redirect_uris = [
+  "https://app.example.com/api/fastbuyjson/auth/customer/callback"
+]
+javascript_origins = [
+  "https://app.example.com"
+]
