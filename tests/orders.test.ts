@@ -852,6 +852,43 @@ describe("GET /api/fastbuyjson/orders/{orderId}", () => {
     assertGateLogs(logs, errors);
   });
 
+  it("keeps email and addresses off line-item pages after the first read", async () => {
+    orderDeps.orderAddressGate = true;
+    const paged = splitLinePages(orderFixture());
+    script.push(() => jsonResponse(200, asOrders([paged.first])));
+    script.push(() => jsonResponse(200, asOrders([paged.second])));
+    const searched = assertOpenOrder(await getOrder(base, "1001", {}, "email=buyer@example.com"));
+    assert.deepEqual(
+      searched.order.items.map((item) => item.productId),
+      ["variant-sku", "line-only-sku", "2003"],
+    );
+    assert.equal(searched.order.shippingAddress?.line1, "123 Main St");
+    assert.equal(searched.order.billingAddress?.line1, "9 Billing Rd");
+    assert.equal(calls.length, 2);
+    assert.equal(graphqlCall(calls, 0).query, ORDERS_BY_QUERY_ADDRESS_DOCUMENT);
+    assert.equal(graphqlCall(calls, 1).query, ORDERS_BY_QUERY_DOCUMENT);
+    assert.equal(graphqlCall(calls, 1).variables.after, "line-page-2");
+    assertPlainOrderSelection(graphqlCall(calls, 1).query);
+
+    calls.length = 0;
+    logs.length = 0;
+    errors.length = 0;
+    const byId = splitLinePages(orderFixture());
+    script.push(() => jsonResponse(200, asOrder(byId.first)));
+    script.push(() => jsonResponse(200, asOrder(byId.second)));
+    const legacy = assertOpenOrder(await getOrder(base, GID, {}, "email=buyer@example.com"));
+    assert.deepEqual(
+      legacy.order.items.map((item) => item.productId),
+      ["variant-sku", "line-only-sku", "2003"],
+    );
+    assert.equal(legacy.order.shippingAddress?.postalCode, "10115");
+    assert.equal(graphqlCall(calls, 0).query, ORDER_BY_ID_ADDRESS_DOCUMENT);
+    assert.equal(graphqlCall(calls, 1).query, ORDER_BY_ID_DOCUMENT);
+    assert.equal(graphqlCall(calls, 1).variables.after, "line-page-2");
+    assertPlainOrderSelection(graphqlCall(calls, 1).query);
+    assertGateLogs(logs, errors);
+  });
+
   it("stays address-free when the email is missing, repeated, malformed, or different", async () => {
     orderDeps.orderAddressGate = true;
     const queries = [
@@ -1307,6 +1344,28 @@ function assertOpenOrder(response: HttpResult): OrderBody {
 
 function addressFixture(): Record<string, unknown> {
   return structuredClone(loadFixture("order-address-gate.json")) as Record<string, unknown>;
+}
+
+function splitLinePages(order: Record<string, unknown>): { first: Record<string, unknown>; second: Record<string, unknown> } {
+  const first = order;
+  const connection = first.lineItems as { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: unknown[] };
+  const rest = connection.nodes.slice(1);
+  connection.nodes = connection.nodes.slice(0, 1);
+  connection.pageInfo = { hasNextPage: true, endCursor: "line-page-2" };
+  const second = orderFixture();
+  const secondConnection = second.lineItems as {
+    pageInfo: { hasNextPage: boolean; endCursor: string | null };
+    nodes: unknown[];
+  };
+  secondConnection.nodes = rest;
+  secondConnection.pageInfo = { hasNextPage: false, endCursor: null };
+  return { first, second };
+}
+
+function assertPlainOrderSelection(query: string): void {
+  assert.equal(/\bemail\b/.test(query), false);
+  assert.equal(/\bshippingAddress\b/.test(query), false);
+  assert.equal(/\bbillingAddress\b/.test(query), false);
 }
 
 function assertNotFound(response: HttpResult): void {

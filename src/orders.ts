@@ -166,7 +166,7 @@ async function loadDigits(
       hit.order,
       "client",
       responseId,
-      (after) => searchPage(deps, token, query, after, addressGate),
+      (after) => searchPage(deps, token, query, after),
       addressGate,
       presentedEmail,
     );
@@ -202,7 +202,7 @@ async function loadSearch(
       hit.order,
       "client",
       responseId,
-      (after) => searchPage(deps, token, query, after, addressGate),
+      (after) => searchPage(deps, token, query, after),
       addressGate,
       presentedEmail,
     );
@@ -231,7 +231,7 @@ async function loadById(
     hit.order,
     "name",
     "",
-    (after) => orderPage(deps, token, gid, after, addressGate),
+    (after) => orderPage(deps, token, gid, after),
     addressGate,
     presentedEmail,
   );
@@ -339,15 +339,8 @@ async function searchOnce(deps: ConnectorDeps, token: string, query: string, add
   return hitFromOrders(call);
 }
 
-async function searchPage(
-  deps: ConnectorDeps,
-  token: string,
-  query: string,
-  after: string,
-  addressGate: boolean,
-): Promise<SearchHit> {
-  const document = addressGate ? ORDERS_BY_QUERY_ADDRESS_DOCUMENT : ORDERS_BY_QUERY_DOCUMENT;
-  const call = await adminCall(deps, token, document, { query, after }, addressGate);
+async function searchPage(deps: ConnectorDeps, token: string, query: string, after: string): Promise<SearchHit> {
+  const call = await adminCall(deps, token, ORDERS_BY_QUERY_DOCUMENT, { query, after }, false);
   return hitFromOrders(call);
 }
 
@@ -357,15 +350,8 @@ async function orderOnce(deps: ConnectorDeps, token: string, id: string, address
   return hitFromOrder(call);
 }
 
-async function orderPage(
-  deps: ConnectorDeps,
-  token: string,
-  id: string,
-  after: string,
-  addressGate: boolean,
-): Promise<SearchHit> {
-  const document = addressGate ? ORDER_BY_ID_ADDRESS_DOCUMENT : ORDER_BY_ID_DOCUMENT;
-  const call = await adminCall(deps, token, document, { id, after }, addressGate);
+async function orderPage(deps: ConnectorDeps, token: string, id: string, after: string): Promise<SearchHit> {
+  const call = await adminCall(deps, token, ORDER_BY_ID_DOCUMENT, { id, after }, false);
   return hitFromOrder(call);
 }
 

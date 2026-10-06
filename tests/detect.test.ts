@@ -9,6 +9,8 @@ import addFormatsModule from "ajv-formats";
 
 import { SHOPIFY_API_VERSION } from "../src/api-version.js";
 import { loadConfig, orderAddressGateEnabled, readPort } from "../src/config.js";
+import type { ConnectorDeps } from "../src/deps.js";
+import { applyOrderAddressGate } from "../src/index.js";
 import { buildDetectResponse, type DetectResponse } from "../src/detect.js";
 import {
   BASE_PATH,
@@ -104,6 +106,20 @@ describe("config", () => {
     for (const value of ["1", " 1 ", "true", "TRUE", " True "]) {
       assert.equal(orderAddressGateEnabled(value), true, JSON.stringify(value));
     }
+  });
+
+  it("boot copies SHOPIFY_ORDER_ADDRESS_GATE onto deps", () => {
+    const deps = { orderAddressGate: true } as ConnectorDeps;
+    applyOrderAddressGate(deps, {});
+    assert.equal(deps.orderAddressGate, false);
+    applyOrderAddressGate(deps, { SHOPIFY_ORDER_ADDRESS_GATE: "" });
+    assert.equal(deps.orderAddressGate, false);
+    applyOrderAddressGate(deps, { SHOPIFY_ORDER_ADDRESS_GATE: "off" });
+    assert.equal(deps.orderAddressGate, false);
+    applyOrderAddressGate(deps, { SHOPIFY_ORDER_ADDRESS_GATE: " true " });
+    assert.equal(deps.orderAddressGate, true);
+    applyOrderAddressGate(deps, { SHOPIFY_ORDER_ADDRESS_GATE: "1" });
+    assert.equal(deps.orderAddressGate, true);
   });
 
   it("defaults the listen port to 3100", () => {
