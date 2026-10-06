@@ -22,11 +22,13 @@ import {
 import {
   ORDER_BY_ID_ADDRESS_DOCUMENT,
   ORDER_BY_ID_DOCUMENT,
+  ORDER_BY_ID_OWNER_ADDRESS_DOCUMENT,
   ORDERS_BY_QUERY_ADDRESS_DOCUMENT,
   ORDERS_BY_QUERY_DOCUMENT,
   legacyOrderGid,
   nameSearchQuery,
   tokenSearchQuery,
+  type OrderAddressRead,
 } from "./order-query.js";
 import { DECRYPT_DETAIL, REINSTALL_DETAIL, internalError, orderNotFound, rateLimited, type Problem } from "./problems.js";
 import { adminGraphqlUrl, defaultSleep, orderAdminGraphql, type OrderAdminCall } from "./shopify-graphql.js";
@@ -58,6 +60,9 @@ type SearchHit =
   | { kind: CallKind };
 
 type LineConnection = { nodes: unknown[]; hasNextPage: boolean; endCursor: string | null };
+
+/** Anonymous reads. Owned orders use `order(id:)` and do not search. */
+type GateRead = Exclude<OrderAddressRead, "owner">;
 
 export function matchOrderRequest(
   method: string,
@@ -98,9 +103,9 @@ export async function handleOrder(
     finish(res, admin.problem, orderId, lookup);
     return;
   }
-  const addressGate = deps.orderAddressGate === true;
-  const presentedEmail = addressGate ? singleQueryEmail(url) : undefined;
-  const loaded = await loadOrder(deps, admin.token, lookup, addressGate, presentedEmail);
+  const addressRead: GateRead = deps.orderAddressGate === true ? "gate" : "off";
+  const presentedEmail = addressRead === "gate" ? singleQueryEmail(url) : undefined;
+  const loaded = await loadOrder(deps, admin.token, lookup, addressRead, presentedEmail);
   await writeOrderResult(res, loaded, orderId, lookup, false);
 }
 
@@ -120,7 +125,7 @@ async function handleCustomerOrder(
     finish(res, admin.problem, orderId, owned.lookup, {}, true);
     return;
   }
-  const loaded = await loadByOwnedGid(deps, admin.token, owned.gid, owned.idMode, owned.clientId);
+  const loaded = await loadByOwnedGid(deps, admin.token, owned.gid, owned.idMode, owned.clientId, "owner");
   await writeOrderResult(res, loaded, orderId, owned.lookup, true);
 }
 
@@ -166,16 +171,16 @@ async function loadOrder(
   deps: ConnectorDeps,
   token: string,
   lookup: Exclude<OrderLookup, { kind: "reject" }>,
-  addressGate: boolean,
+  addressRead: GateRead,
   presentedEmail: string | undefined,
 ): Promise<LoadResult> {
   switch (lookup.kind) {
     case "gid":
-      return loadById(deps, token, lookup.gid, addressGate, presentedEmail);
+      return loadById(deps, token, lookup.gid, addressRead, presentedEmail);
     case "digits":
-      return loadDigits(deps, token, lookup.digits, lookup.responseId, addressGate, presentedEmail);
+      return loadDigits(deps, token, lookup.digits, lookup.responseId, addressRead, presentedEmail);
     case "search":
-      return loadSearch(deps, token, lookup.value, lookup.responseId, addressGate, presentedEmail);
+      return loadSearch(deps, token, lookup.value, lookup.responseId, addressRead, presentedEmail);
     default: {
       const unexpected: never = lookup;
       throw new Error(`Unhandled order lookup: ${String(unexpected)}`);
@@ -188,21 +193,21 @@ async function loadDigits(
   token: string,
   digits: string,
   responseId: string,
-  addressGate: boolean,
+  addressRead: GateRead,
   presentedEmail: string | undefined,
 ): Promise<LoadResult> {
   const query = nameSearchQuery(digits);
   if (query === null) {
     return { kind: "not_found" };
   }
-  const hit = await searchOnce(deps, token, query, addressGate);
+  const hit = await searchOnce(deps, token, query, addressRead);
   if (hit.kind === "one") {
     return complete(
       hit.order,
       "client",
       responseId,
       (after) => searchPage(deps, token, query, after),
-      addressGate,
+      addressRead,
       presentedEmail,
     );
   }
@@ -216,7 +221,7 @@ async function loadDigits(
   if (gid === null) {
     return { kind: "not_found" };
   }
-  return loadById(deps, token, gid, addressGate, presentedEmail);
+  return loadById(deps, token, gid, addressRead, presentedEmail);
 }
 
 async function loadSearch(
@@ -224,21 +229,21 @@ async function loadSearch(
   token: string,
   value: string,
   responseId: string,
-  addressGate: boolean,
+  addressRead: GateRead,
   presentedEmail: string | undefined,
 ): Promise<LoadResult> {
   const query = tokenSearchQuery(value);
   if (query === null) {
     return { kind: "not_found" };
   }
-  const hit = await searchOnce(deps, token, query, addressGate);
+  const hit = await searchOnce(deps, token, query, addressRead);
   if (hit.kind === "one") {
     return complete(
       hit.order,
       "client",
       responseId,
       (after) => searchPage(deps, token, query, after),
-      addressGate,
+      addressRead,
       presentedEmail,
     );
   }
@@ -252,10 +257,10 @@ async function loadById(
   deps: ConnectorDeps,
   token: string,
   gid: string,
-  addressGate: boolean,
+  addressRead: GateRead,
   presentedEmail: string | undefined,
 ): Promise<LoadResult> {
-  return loadByOwnedGid(deps, token, gid, "name", "", addressGate, presentedEmail);
+  return loadByOwnedGid(deps, token, gid, "name", "", addressRead, presentedEmail);
 }
 
 async function loadByOwnedGid(
@@ -264,10 +269,10 @@ async function loadByOwnedGid(
   gid: string,
   idMode: IdMode,
   clientId: string,
-  addressGate = false,
+  addressRead: OrderAddressRead = "off",
   presentedEmail?: string,
 ): Promise<LoadResult> {
-  const hit = await orderOnce(deps, token, gid, addressGate);
+  const hit = await orderOnce(deps, token, gid, addressRead);
   if (hit.kind !== "one") {
     if (hit.kind === "none" || hit.kind === "many") {
       return { kind: "not_found" };
@@ -279,7 +284,7 @@ async function loadByOwnedGid(
     idMode,
     clientId,
     (after) => orderPage(deps, token, gid, after),
-    addressGate,
+    addressRead,
     presentedEmail,
   );
 }
@@ -289,7 +294,7 @@ async function complete(
   idMode: IdMode,
   clientId: string,
   nextOrder: (after: string) => Promise<SearchHit>,
-  addressGate: boolean,
+  addressRead: OrderAddressRead,
   presentedEmail: string | undefined,
 ): Promise<LoadResult> {
   const lines = await collectLines(order, nextOrder);
@@ -300,10 +305,29 @@ async function complete(
   if (mapped.kind !== "ok") {
     return { kind: "invalid" };
   }
-  if (addressGate && addressGateOpens(presentedEmail, order)) {
+  if (addressesAttach(addressRead, presentedEmail, order)) {
     attachAddresses(mapped.body, order);
   }
   return { kind: "ok", body: mapped.body };
+}
+
+function addressesAttach(
+  addressRead: OrderAddressRead,
+  presentedEmail: string | undefined,
+  order: Record<string, unknown>,
+): boolean {
+  switch (addressRead) {
+    case "off":
+      return false;
+    case "owner":
+      return true;
+    case "gate":
+      return addressGateOpens(presentedEmail, order);
+    default: {
+      const unexpected: never = addressRead;
+      throw new Error(`Unhandled address read: ${String(unexpected)}`);
+    }
+  }
 }
 
 function addressGateOpens(presentedEmail: string | undefined, order: Record<string, unknown>): boolean {
@@ -380,26 +404,54 @@ async function collectLines(
   return { kind: "ok", lines };
 }
 
-async function searchOnce(deps: ConnectorDeps, token: string, query: string, addressGate: boolean): Promise<SearchHit> {
-  const document = addressGate ? ORDERS_BY_QUERY_ADDRESS_DOCUMENT : ORDERS_BY_QUERY_DOCUMENT;
-  const call = await adminCall(deps, token, document, { query, after: null }, addressGate);
+async function searchOnce(deps: ConnectorDeps, token: string, query: string, addressRead: GateRead): Promise<SearchHit> {
+  const document = ordersQueryDocument(addressRead);
+  const call = await adminCall(deps, token, document, { query, after: null }, addressRead);
   return hitFromOrders(call);
 }
 
 async function searchPage(deps: ConnectorDeps, token: string, query: string, after: string): Promise<SearchHit> {
-  const call = await adminCall(deps, token, ORDERS_BY_QUERY_DOCUMENT, { query, after }, false);
+  const call = await adminCall(deps, token, ORDERS_BY_QUERY_DOCUMENT, { query, after }, "off");
   return hitFromOrders(call);
 }
 
-async function orderOnce(deps: ConnectorDeps, token: string, id: string, addressGate: boolean): Promise<SearchHit> {
-  const document = addressGate ? ORDER_BY_ID_ADDRESS_DOCUMENT : ORDER_BY_ID_DOCUMENT;
-  const call = await adminCall(deps, token, document, { id, after: null }, addressGate);
+async function orderOnce(deps: ConnectorDeps, token: string, id: string, addressRead: OrderAddressRead): Promise<SearchHit> {
+  const document = orderDocument(addressRead);
+  const call = await adminCall(deps, token, document, { id, after: null }, addressRead);
   return hitFromOrder(call);
 }
 
 async function orderPage(deps: ConnectorDeps, token: string, id: string, after: string): Promise<SearchHit> {
-  const call = await adminCall(deps, token, ORDER_BY_ID_DOCUMENT, { id, after }, false);
+  const call = await adminCall(deps, token, ORDER_BY_ID_DOCUMENT, { id, after }, "off");
   return hitFromOrder(call);
+}
+
+function ordersQueryDocument(addressRead: GateRead): string {
+  switch (addressRead) {
+    case "off":
+      return ORDERS_BY_QUERY_DOCUMENT;
+    case "gate":
+      return ORDERS_BY_QUERY_ADDRESS_DOCUMENT;
+    default: {
+      const unexpected: never = addressRead;
+      throw new Error(`Unhandled address read: ${String(unexpected)}`);
+    }
+  }
+}
+
+function orderDocument(addressRead: OrderAddressRead): string {
+  switch (addressRead) {
+    case "off":
+      return ORDER_BY_ID_DOCUMENT;
+    case "gate":
+      return ORDER_BY_ID_ADDRESS_DOCUMENT;
+    case "owner":
+      return ORDER_BY_ID_OWNER_ADDRESS_DOCUMENT;
+    default: {
+      const unexpected: never = addressRead;
+      throw new Error(`Unhandled address read: ${String(unexpected)}`);
+    }
+  }
 }
 
 function hitFromOrders(call: OrderAdminCall): SearchHit {
@@ -469,7 +521,7 @@ function adminCall(
   token: string,
   query: string,
   variables: Record<string, unknown>,
-  addressGate: boolean,
+  addressRead: OrderAddressRead,
 ): Promise<OrderAdminCall> {
   return orderAdminGraphql({
     url: adminGraphqlUrl(deps.app.shopDomain, deps.app.apiVersion),
@@ -479,7 +531,7 @@ function adminCall(
     variables,
     fetch: deps.fetch,
     sleep: deps.sleep ?? defaultSleep,
-    addressGate,
+    addressRead,
   });
 }
 

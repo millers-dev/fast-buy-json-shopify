@@ -14,10 +14,15 @@
  * `discountedTotalSet` / `originalTotalSet`.
  * The selection set does not read phone, customer name, `CardPaymentDetails`,
  * or the Order GID. `email`, `shippingAddress`, and `billingAddress` are added
- * only when `SHOPIFY_ORDER_ADDRESS_GATE` is on. That address selection is
+ * only when `SHOPIFY_ORDER_ADDRESS_GATE` is on. When `SHOPIFY_CUSTOMER_ACCOUNTS`
+ * is on, the owned `order(id:)` read adds `shippingAddress` and `billingAddress`
+ * and does not add `email`. That address selection is
  * `address1`, `address2`, `city`, `province`, `countryCodeV2`, and `zip`.
  * It does not read `displayAddress`, `country`, `countryCode`, or `provinceCode`.
  */
+
+/** Which address fields an Admin order read selects, and how field errors are classified. */
+export type OrderAddressRead = "off" | "gate" | "owner";
 
 export const ORDER_LINE_PAGE = 50;
 export const ORDER_TRACKING_CAP = 10;
@@ -67,8 +72,7 @@ const ORDER_FIELDS = `
       }
     }`;
 
-const ADDRESS_FIELDS = `
-    email
+const MAILING_ADDRESS_FIELDS = `
     shippingAddress {
       address1
       address2
@@ -86,8 +90,22 @@ const ADDRESS_FIELDS = `
       zip
     }`;
 
-function orderFields(addressGate: boolean): string {
-  return addressGate ? `${ORDER_FIELDS}${ADDRESS_FIELDS}` : ORDER_FIELDS;
+const ADDRESS_FIELDS = `
+    email${MAILING_ADDRESS_FIELDS}`;
+
+function orderFields(read: OrderAddressRead): string {
+  switch (read) {
+    case "off":
+      return ORDER_FIELDS;
+    case "gate":
+      return `${ORDER_FIELDS}${ADDRESS_FIELDS}`;
+    case "owner":
+      return `${ORDER_FIELDS}${MAILING_ADDRESS_FIELDS}`;
+    default: {
+      const unexpected: never = read;
+      throw new Error(`Unhandled order address fields: ${String(unexpected)}`);
+    }
+  }
 }
 
 export const ORDER_BY_ID_DOCUMENT = orderByIdDocument(false);
@@ -98,10 +116,17 @@ export const ORDER_BY_ID_ADDRESS_DOCUMENT = orderByIdDocument(true);
 
 export const ORDERS_BY_QUERY_ADDRESS_DOCUMENT = ordersByQueryDocument(true);
 
+/** Owned Admin order while customer accounts are on. Addresses, no `email`. */
+export const ORDER_BY_ID_OWNER_ADDRESS_DOCUMENT = orderByIdDocumentFor("owner");
+
 export function orderByIdDocument(addressGate: boolean): string {
+  return orderByIdDocumentFor(addressGate ? "gate" : "off");
+}
+
+function orderByIdDocumentFor(read: OrderAddressRead): string {
   return `
 query OrderById($id: ID!, $after: String) {
-  order(id: $id) {${orderFields(addressGate)}
+  order(id: $id) {${orderFields(read)}
   }
 }`;
 }
@@ -110,7 +135,7 @@ export function ordersByQueryDocument(addressGate: boolean): string {
   return `
 query OrdersByQuery($query: String!, $after: String) {
   orders(first: 2, query: $query) {
-    nodes {${orderFields(addressGate)}
+    nodes {${orderFields(addressGate ? "gate" : "off")}
     }
   }
 }`;

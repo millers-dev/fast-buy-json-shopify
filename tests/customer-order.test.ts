@@ -14,6 +14,7 @@ import { CUSTOMER_APP_URL_DETAIL, CUSTOMER_LOGIN_INCOMPLETE_DETAIL, customerSub,
 import { CUSTOMER_USER_AGENT } from "../src/customer-login-shopify.js";
 import type { ConnectorDeps } from "../src/deps.js";
 import { OauthStateStore } from "../src/oauth-state.js";
+import { ORDER_BY_ID_DOCUMENT, ORDER_BY_ID_OWNER_ADDRESS_DOCUMENT, ORDERS_BY_QUERY_ADDRESS_DOCUMENT } from "../src/order-query.js";
 import { REINSTALL_DETAIL } from "../src/problems.js";
 import { createConnectorServer, listen } from "../src/server.js";
 import { SHOPIFY_BACKOFF_MS } from "../src/shopify-graphql.js";
@@ -52,9 +53,19 @@ type OrderBody = {
     totals: { subtotal: number; shipping?: number; total: number };
     payment?: { status: string; lastFourDigits?: string; brand?: string };
     shipment?: { trackingNumber?: string; carrier?: string };
-    shippingAddress?: unknown;
-    billingAddress?: unknown;
+    items?: { productId: string }[];
+    shippingAddress?: PostalAddress;
+    billingAddress?: PostalAddress;
   };
+};
+
+type PostalAddress = {
+  line1: string;
+  line2?: string;
+  city: string;
+  region?: string;
+  country: string;
+  postalCode: string;
 };
 
 describe("customer-mode GET /orders/{orderId}", () => {
@@ -194,10 +205,10 @@ describe("customer-mode GET /orders/{orderId}", () => {
     assert.equal(response.text.includes("gid://"), false);
   });
 
-  it("maps one owned order with the admin body and omits addresses and card fields", async () => {
+  it("maps one owned order with both addresses and omits card fields", async () => {
     script.push(() => jsonResponse(200, loadFixture("customer-orders-one.json")));
     script.push(() => jsonResponse(200, asOrder(deliveredWithSecrets())));
-    const response = await getOrder(base, "1001", authHeaders(), "email=buyer@example.com");
+    const response = await getOrder(base, "1001", authHeaders());
     const body = assertOrder(response);
     assert.equal(body.order.id, "1001");
     assert.equal(body.order.status, "delivered");
@@ -205,14 +216,16 @@ describe("customer-mode GET /orders/{orderId}", () => {
     assert.equal(body.order.payment?.status, "approved");
     assert.equal(body.order.shipment?.trackingNumber, "TRACK-DELIVERED");
     assert.equal(body.order.shipment?.carrier, "DHL");
-    assert.equal(Object.hasOwn(body.order, "shippingAddress"), false);
-    assert.equal(Object.hasOwn(body.order, "billingAddress"), false);
+    assert.deepEqual(body.order.shippingAddress, SHIPPING);
+    assert.deepEqual(body.order.billingAddress, BILLING);
     assert.equal(Object.hasOwn(body.order.payment ?? {}, "lastFourDigits"), false);
     assert.equal(Object.hasOwn(body.order.payment ?? {}, "brand"), false);
+    assert.equal(Object.hasOwn(body, "userId"), false);
     assert.equal(response.text.includes("gid://"), false);
-    assert.equal(response.text.includes("123 Main St"), false);
+    assert.equal(response.text.includes("123 Main St"), true);
     assert.equal(response.text.includes("4242"), false);
     assert.equal(response.text.includes("Visa"), false);
+    assertNoBuyerIdentity(response.text);
 
     assert.equal(calls.length, 2);
     const owned = graphqlCall(calls, 0);
@@ -223,14 +236,13 @@ describe("customer-mode GET /orders/{orderId}", () => {
     assert.equal(owned.variables.query, "name:#1001");
     assert.equal(/\bemail\b/.test(owned.query), false);
     const admin = graphqlCall(calls, 1);
-    expectAdmin(admin);
-    assert.equal(admin.query.includes("order(id:"), true);
+    expectOwnedAdmin(admin);
+    assert.equal(admin.query, ORDER_BY_ID_OWNER_ADDRESS_DOCUMENT);
     assert.equal(admin.variables.id, ORDER_GID);
-    assert.equal(/\bshippingAddress\b/.test(admin.query), false);
-    assert.equal(/\bemail\b/.test(admin.query), false);
     assert.equal(logs.some((line) => line.includes("order status 200 1001 customer-accounts-on")), true);
     assertSafe(response.text);
     assertSafe(logs.join("\n"));
+    assertAddressFreeLogs(logs.join("\n"));
   });
 
   it("uses the client token for a confirmation number and the order name for a GID", async () => {
@@ -268,7 +280,7 @@ describe("customer-mode GET /orders/{orderId}", () => {
     assert.equal(calls.length, 3);
     assert.equal(graphqlCall(calls, 0).variables.query, "name:#1001");
     assert.equal(graphqlCall(calls, 1).variables.query, "id:1001");
-    expectAdmin(graphqlCall(calls, 2));
+    expectOwnedAdmin(graphqlCall(calls, 2));
     assert.equal(calls.filter((call) => call.url.includes("/admin/")).length, 1);
   });
 
@@ -320,24 +332,25 @@ describe("customer-mode GET /orders/{orderId}", () => {
     assert.equal(missing.text.includes("window"), false);
   });
 
-  it("ignores ?email= and the address gate while customer mode is on", async () => {
+  it("maps addresses when the email does not match and the address gate is on", async () => {
     orderDeps.orderAddressGate = true;
     script.push(() => jsonResponse(200, loadFixture("customer-orders-one.json")));
     script.push(() => jsonResponse(200, asOrder(loadFixture("order-address-gate.json"))));
-    const response = await getOrder(base, "1001", authHeaders(), "email=buyer@example.com");
+    const response = await getOrder(base, "1001", authHeaders(), "email=other@example.com");
     const body = assertOrder(response);
-    assert.equal(Object.hasOwn(body.order, "shippingAddress"), false);
-    assert.equal(Object.hasOwn(body.order, "billingAddress"), false);
+    assert.deepEqual(body.order.shippingAddress, SHIPPING);
+    assert.deepEqual(body.order.billingAddress, BILLING);
     assert.equal(Object.hasOwn(body.order.payment ?? {}, "lastFourDigits"), false);
     assert.equal(Object.hasOwn(body.order.payment ?? {}, "brand"), false);
     const admin = graphqlCall(calls, 1);
-    assert.equal(/\bshippingAddress\b/.test(admin.query), false);
-    assert.equal(/\bbillingAddress\b/.test(admin.query), false);
+    assert.equal(admin.query, ORDER_BY_ID_OWNER_ADDRESS_DOCUMENT);
+    assert.notEqual(admin.query, ORDERS_BY_QUERY_ADDRESS_DOCUMENT);
     assert.equal(/\bemail\b/.test(admin.query), false);
-    assert.equal(response.text.includes("123 Main St"), false);
-    assert.equal(response.text.includes("buyer@example.com"), false);
+    assert.equal(admin.query.includes("CardPaymentDetails"), false);
+    assertNoBuyerIdentity(response.text);
     assert.equal(response.text.includes("4242"), false);
     assert.equal(logs.join("\n").includes("email="), false);
+    assertAddressFreeLogs(logs.join("\n"));
     assertSafe(response.text);
   });
 
@@ -418,6 +431,97 @@ describe("customer-mode GET /orders/{orderId}", () => {
     assert.equal(logs.some((line) => line.includes("gid://")), false);
   });
 
+  it("omits an address whose country is ZZ or whose required field is missing", async () => {
+    const rows = ["order-address-zz.json", "order-address-zip-null.json", "order-address-country-null.json", "order-address-shipping-null.json", "order-address-missing-city.json"];
+    for (const fixture of rows) {
+      calls.length = 0;
+      logs.length = 0;
+      script.push(() => jsonResponse(200, loadFixture("customer-orders-one.json")));
+      script.push(() => jsonResponse(200, asOrder(loadFixture(fixture))));
+      const response = await getOrder(base, "1001", authHeaders(), "email=buyer@example.com");
+      const body = assertOrder(response);
+      assert.equal(Object.hasOwn(body.order, "shippingAddress"), false, fixture);
+      assert.equal(body.order.billingAddress?.line1, "9 Billing Rd", fixture);
+      assert.equal(body.order.billingAddress?.city, "Munich", fixture);
+      assert.equal(response.text.includes("1 Unknown Way"), false, fixture);
+      assert.equal(response.text.includes("123 Main St"), false, fixture);
+      assert.equal(response.text.includes("ZZ"), false, fixture);
+      assertNoBuyerIdentity(response.text);
+      assertAddressFreeLogs(logs.join("\n"));
+      assert.equal(graphqlCall(calls, 1).query, ORDER_BY_ID_OWNER_ADDRESS_DOCUMENT, fixture);
+    }
+  });
+
+  it("omits a redacted shipping address and still maps billing", async () => {
+    const zip = addressFixture();
+    const shipping = zip.shippingAddress as Record<string, unknown>;
+    shipping.zip = null;
+    script.push(() => jsonResponse(200, loadFixture("customer-orders-one.json")));
+    script.push(() => jsonResponse(200, ownedAddressError(zip, ["shippingAddress", "zip"])));
+    const zipBody = assertOrder(await getOrder(base, "1001", authHeaders()));
+    assert.equal(Object.hasOwn(zipBody.order, "shippingAddress"), false);
+    assert.deepEqual(zipBody.order.billingAddress, BILLING);
+    assert.equal(JSON.stringify(zipBody).includes("123 Main St"), false);
+    assertAddressFreeLogs(logs.join("\n"));
+
+    calls.length = 0;
+    logs.length = 0;
+    const whole = addressFixture();
+    whole.shippingAddress = null;
+    script.push(() => jsonResponse(200, loadFixture("customer-orders-one.json")));
+    script.push(() => jsonResponse(200, ownedAddressError(whole, ["shippingAddress"])));
+    const wholeResponse = await getOrder(base, "1001", authHeaders());
+    const wholeBody = assertOrder(wholeResponse);
+    assert.equal(wholeResponse.status, 200);
+    assert.equal(Object.hasOwn(wholeBody.order, "shippingAddress"), false);
+    assert.equal(wholeBody.order.billingAddress?.city, "Munich");
+    assert.equal(wholeResponse.text.includes("123 Main St"), false);
+    assertAddressFreeLogs(logs.join("\n"));
+  });
+
+  it("returns 500 when an error path is email, another field, or missing", async () => {
+    const cases: { name: string; body: unknown }[] = [
+      { name: "email", body: ownedAddressError(addressFixture(), ["email"]) },
+      { name: "fulfillments", body: ownedAddressError(addressFixture(), ["fulfillments"]) },
+      { name: "no-path", body: { data: { order: addressFixture() }, errors: [{ message: "Something went wrong." }] } },
+    ];
+    for (const row of cases) {
+      calls.length = 0;
+      logs.length = 0;
+      script.push(() => jsonResponse(200, loadFixture("customer-orders-one.json")));
+      script.push(() => jsonResponse(200, row.body));
+      const response = await getOrder(base, "1001", authHeaders());
+      assertProblem(response, 500, "INTERNAL_ERROR");
+      assert.equal((response.json as ProblemBody).detail, "The order request could not be completed.");
+      assert.equal(Object.hasOwn(response.json as object, "order"), false, row.name);
+      assert.equal(response.text.includes("123 Main St"), false, row.name);
+      assert.equal(response.text.includes("buyer@example.com"), false, row.name);
+      assertAddressFreeLogs(logs.join("\n"));
+    }
+  });
+
+  it("keeps the address selection off later line-item pages", async () => {
+    const pages = splitOwnedLines(addressedAdminOrder());
+    script.push(() => jsonResponse(200, loadFixture("customer-orders-one.json")));
+    script.push(() => jsonResponse(200, asOrder(pages.first)));
+    script.push(() => jsonResponse(200, asOrder(pages.second)));
+    const body = assertOrder(await getOrder(base, "1001", authHeaders()));
+    assert.deepEqual(
+      body.order.items?.map((item) => item.productId),
+      ["variant-sku", "line-only-sku", "2003"],
+    );
+    assert.deepEqual(body.order.shippingAddress, SHIPPING);
+    assert.deepEqual(body.order.billingAddress, BILLING);
+    assert.equal(calls.length, 3);
+    assert.equal(graphqlCall(calls, 1).query, ORDER_BY_ID_OWNER_ADDRESS_DOCUMENT);
+    assert.equal(graphqlCall(calls, 2).query, ORDER_BY_ID_DOCUMENT);
+    assert.equal(graphqlCall(calls, 2).variables.after, "line-page-2");
+    assert.equal(/\bshippingAddress\b/.test(graphqlCall(calls, 2).query), false);
+    assert.equal(/\bbillingAddress\b/.test(graphqlCall(calls, 2).query), false);
+    assert.equal(/\bemail\b/.test(graphqlCall(calls, 2).query), false);
+    assertNoBuyerIdentity(JSON.stringify(body));
+  });
+
   it("keeps anonymous order reads when the flag is off", async () => {
     orderDeps.customerAccounts = false;
     script.push(() => jsonResponse(200, asOrders([loadFixture("order-admin.json")])));
@@ -430,6 +534,27 @@ describe("customer-mode GET /orders/{orderId}", () => {
     assert.equal(graphqlCall(calls, 0).variables.query, 'name:"#1001"');
     assert.equal(logs.some((line) => line.includes("customer-accounts-on")), false);
     assert.equal(response.headers.get("www-authenticate"), null);
+  });
+
+  it("keeps the email gate when customer accounts are off", async () => {
+    orderDeps.customerAccounts = false;
+    orderDeps.orderAddressGate = true;
+    script.push(() => jsonResponse(200, asOrders([loadFixture("order-address-gate.json")])));
+    const opened = assertOrder(await getOrder(base, "1001", { Authorization: "Bearer demo.jwt.leftover" }, "email=buyer@example.com"));
+    assert.deepEqual(opened.order.shippingAddress, SHIPPING);
+    assert.deepEqual(opened.order.billingAddress, BILLING);
+    assert.equal(graphqlCall(calls, 0).query, ORDERS_BY_QUERY_ADDRESS_DOCUMENT);
+    assert.equal(calls.length, 1);
+    assertNoBuyerIdentity(JSON.stringify(opened));
+
+    calls.length = 0;
+    logs.length = 0;
+    script.push(() => jsonResponse(200, asOrders([loadFixture("order-address-gate.json")])));
+    const closed = assertOrder(await getOrder(base, "1001", {}, "email=other@example.com"));
+    assert.equal(Object.hasOwn(closed.order, "shippingAddress"), false);
+    assert.equal(Object.hasOwn(closed.order, "billingAddress"), false);
+    assert.equal(closed.order.id, "1001");
+    assert.equal(JSON.stringify(closed).includes("123 Main St"), false);
   });
 
   it("asks the buyer to log in again when the session has no Customer Account API URL", async () => {
@@ -543,6 +668,117 @@ function expectAdmin(call: GraphqlCall): void {
   assert.equal(/\bbillingAddress\b/.test(call.query), false);
   assert.equal(/\bemail\b/.test(call.query), false);
   assert.equal(call.query.includes("CardPaymentDetails"), false);
+}
+
+function expectOwnedAdmin(call: GraphqlCall): void {
+  assert.equal(call.url, `https://${SHOP}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`);
+  assert.equal(call.headers["X-Shopify-Access-Token"], ADMIN_TOKEN);
+  assert.equal(call.query, ORDER_BY_ID_OWNER_ADDRESS_DOCUMENT);
+  assertOwnerAddressSelection(call.query);
+  assert.equal(call.query.includes("CardPaymentDetails"), false);
+}
+
+function assertOwnerAddressSelection(query: string): void {
+  assert.equal(/\bemail\b/.test(query), false);
+  const blocks = [...query.matchAll(/(?:shipping|billing)Address\s*\{([^}]*)\}/g)].map((match) => match[1] ?? "");
+  assert.equal(blocks.length, 2);
+  for (const block of blocks) {
+    for (const field of ["address1", "address2", "city", "province", "countryCodeV2", "zip"]) {
+      assert.match(block, new RegExp(`\\b${field}\\b`));
+    }
+    assert.equal(/\bphone\b/.test(block), false);
+    assert.equal(/\bname\b/.test(block), false);
+    assert.equal(/\bfirstName\b/.test(block), false);
+    assert.equal(/\blastName\b/.test(block), false);
+    assert.equal(/\bcompany\b/.test(block), false);
+    assert.equal(/\bcountry\b/.test(block), false);
+    assert.equal(/\bcountryCode\b/.test(block), false);
+    assert.equal(/\bprovinceCode\b/.test(block), false);
+  }
+  assert.equal(/\bphone\b/.test(query), false);
+  assert.equal(/\bcustomer\b/.test(query), false);
+  assert.equal(/\bdisplayAddress\b/.test(query), false);
+  assert.equal(/\bCardPaymentDetails\b/.test(query), false);
+}
+
+const SHIPPING: PostalAddress = {
+  line1: "123 Main St",
+  line2: "Apt 4B",
+  city: "Berlin",
+  region: "Berlin",
+  country: "DE",
+  postalCode: "10115",
+};
+
+const BILLING: PostalAddress = {
+  line1: "9 Billing Rd",
+  line2: "Suite 2",
+  city: "Munich",
+  region: "Bavaria",
+  country: "DE",
+  postalCode: "80331",
+};
+
+function addressFixture(): Record<string, unknown> {
+  return structuredClone(loadFixture("order-address-gate.json")) as Record<string, unknown>;
+}
+
+function addressedAdminOrder(): Record<string, unknown> {
+  const order = structuredClone(loadFixture("order-admin.json")) as Record<string, unknown>;
+  const addressed = addressFixture();
+  order.email = addressed.email;
+  order.shippingAddress = addressed.shippingAddress;
+  order.billingAddress = addressed.billingAddress;
+  order.transactions = addressed.transactions;
+  return order;
+}
+
+function ownedAddressError(order: Record<string, unknown>, path: unknown[]): unknown {
+  return {
+    data: { order },
+    errors: [
+      {
+        message: "Access denied for address field.",
+        path: ["order", ...path],
+        extensions: { code: "ACCESS_DENIED" },
+      },
+    ],
+  };
+}
+
+function splitOwnedLines(order: Record<string, unknown>): { first: Record<string, unknown>; second: Record<string, unknown> } {
+  const first = order;
+  const connection = first.lineItems as { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: unknown[] };
+  const rest = connection.nodes.slice(1);
+  connection.nodes = connection.nodes.slice(0, 1);
+  connection.pageInfo = { hasNextPage: true, endCursor: "line-page-2" };
+  const second = structuredClone(loadFixture("order-admin.json")) as Record<string, unknown>;
+  const secondConnection = second.lineItems as { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: unknown[] };
+  secondConnection.nodes = rest;
+  secondConnection.pageInfo = { hasNextPage: false, endCursor: null };
+  return { first, second };
+}
+
+function assertNoBuyerIdentity(text: string): void {
+  assert.equal(text.includes("buyer@example.com"), false);
+  assert.equal(text.includes("customer@example.com"), false);
+  assert.equal(text.includes("@"), false);
+  assert.equal(text.includes("Ada Lovelace"), false);
+  assert.equal(text.includes("+15555550100"), false);
+  assert.equal(text.includes("999 Display Only"), false);
+  assert.equal(text.includes("Germany"), false);
+  assert.equal(text.includes("BE-CODE"), false);
+  assert.equal(text.includes("Visa"), false);
+  assert.equal(text.includes("4242"), false);
+  assert.equal(text.includes("userId"), false);
+}
+
+function assertAddressFreeLogs(text: string): void {
+  assert.equal(text.includes("123 Main St"), false);
+  assert.equal(text.includes("9 Billing Rd"), false);
+  assert.equal(text.includes("buyer@example.com"), false);
+  assert.equal(text.includes("email="), false);
+  assert.equal(text.includes("@"), false);
 }
 
 async function getOrder(

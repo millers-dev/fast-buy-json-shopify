@@ -4,7 +4,8 @@
 #
 # Protected customer data, Partner Dashboard → API access requests:
 # declare Name and Email (level 2 for Customer Account API login).
-# Do not declare Address in this phase. Do not declare Phone.
+# declare Address. When SHOPIFY_CUSTOMER_ACCOUNTS is on, the owned order
+# returns shipping and billing street lines. Do not declare Phone.
 # The HTTP API does not return name, email, or phone.
 
 name = "FastBuyJSON Shopify"
