@@ -1,0 +1,15 @@
+{
+  "data": {
+    "customer": {
+      "id": "gid://shopify/Customer/42",
+      "orders": {
+        "nodes": [
+          {
+            "id": "gid://shopify/Order/9999",
+            "name": "#9999"
+          }
+        ]
+      }
+    }
+  }
+}

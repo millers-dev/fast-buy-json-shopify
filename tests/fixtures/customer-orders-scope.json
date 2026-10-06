@@ -1,0 +1,18 @@
+{
+  "errors": [
+    {
+      "message": "Access denied for orders field. Required access: `customer_read_orders` access scope.",
+      "path": ["customer", "orders"],
+      "extensions": {
+        "code": "ACCESS_DENIED",
+        "requiredAccess": "`customer_read_orders` access scope."
+      }
+    }
+  ],
+  "data": {
+    "customer": {
+      "id": "gid://shopify/Customer/42",
+      "orders": null
+    }
+  }
+}

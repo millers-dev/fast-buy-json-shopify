@@ -18,6 +18,14 @@ export type OrderAdminCall =
   | { kind: "reinstall" }
   | { kind: "failed" };
 
+/** Customer Account API ownership reads. HTTP 401 is not an Admin reinstall. */
+export type CustomerAccountCall =
+  | { kind: "ok"; data: unknown }
+  | { kind: "throttled" }
+  | { kind: "unauthorized" }
+  | { kind: "reinstall" }
+  | { kind: "failed" };
+
 export function adminGraphqlUrl(shopDomain: string, apiVersion: string): string {
   return `https://${shopDomain}/admin/api/${apiVersion}/graphql.json`;
 }
@@ -63,6 +71,30 @@ export async function orderAdminGraphql(args: GraphqlArgs): Promise<OrderAdminCa
   return orderCallOnce(args);
 }
 
+type CustomerGraphqlArgs = {
+  url: string;
+  accessToken: string;
+  origin: string;
+  userAgent: string;
+  query: string;
+  variables: Record<string, unknown>;
+  fetch: typeof fetch;
+  sleep: (ms: number) => Promise<void>;
+};
+
+/**
+ * Customer Account API GraphQL. `Authorization` is the customer access token
+ * itself, not `Bearer`. One throttle backoff, then the second result.
+ */
+export async function customerAccountGraphql(args: CustomerGraphqlArgs): Promise<CustomerAccountCall> {
+  const first = await customerCallOnce(args);
+  if (first.kind !== "throttled") {
+    return first;
+  }
+  await args.sleep(SHOPIFY_BACKOFF_MS);
+  return customerCallOnce(args);
+}
+
 type FetchedGraphql =
   | { kind: "throttled" }
   | { kind: "failed" }
@@ -91,6 +123,56 @@ async function orderCallOnce(args: GraphqlArgs): Promise<OrderAdminCall> {
     return fetched;
   }
   return classifyOrderPayload(fetched.status, fetched.payload, args.addressGate === true);
+}
+
+async function customerCallOnce(args: CustomerGraphqlArgs): Promise<CustomerAccountCall> {
+  const fetched = await fetchCustomerAccount(args);
+  if (fetched.kind !== "http") {
+    return fetched;
+  }
+  return classifyCustomerPayload(fetched.status, fetched.payload);
+}
+
+async function fetchCustomerAccount(args: CustomerGraphqlArgs): Promise<FetchedGraphql> {
+  let response: Response;
+  try {
+    response = await args.fetch(args.url, {
+      method: "POST",
+      redirect: "error",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        "User-Agent": args.userAgent,
+        Origin: args.origin,
+        Authorization: args.accessToken,
+      },
+      body: JSON.stringify({ query: args.query, variables: args.variables }),
+      signal: AbortSignal.timeout(GRAPHQL_TIMEOUT_MS),
+    });
+  } catch {
+    return { kind: "failed" };
+  }
+  const payload = await readPayload(response);
+  if (isThrottled(response.status, payload)) {
+    return { kind: "throttled" };
+  }
+  return { kind: "http", status: response.status, ok: response.ok, payload };
+}
+
+function classifyCustomerPayload(status: number, payload: unknown): CustomerAccountCall {
+  if (status === 401) {
+    return { kind: "unauthorized" };
+  }
+  if (isRecord(payload) && hasAccessDenied(payload)) {
+    return { kind: "reinstall" };
+  }
+  if (status < 200 || status >= 300 || !isRecord(payload) || !isRecord(payload.data)) {
+    return { kind: "failed" };
+  }
+  if (hasErrors(payload)) {
+    return { kind: "failed" };
+  }
+  return { kind: "ok", data: payload.data };
 }
 
 async function fetchGraphql(args: GraphqlArgs): Promise<FetchedGraphql> {

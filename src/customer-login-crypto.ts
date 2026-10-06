@@ -106,7 +106,8 @@ export type FastBuyJwtClaims = {
 };
 
 /**
- * Checks the HMAC and the claim set. Expiry is enforced when an order read accepts the JWT (PR 3).
+ * Checks the HMAC and the claim set. It does not check `exp`.
+ * An order read calls `fastBuyJwtUsable` before it accepts the JWT.
  */
 export function verifyFastBuyJwt(secret: string, token: string): FastBuyJwtClaims | null {
   const parts = token.split(".");
@@ -144,6 +145,14 @@ export function verifyFastBuyJwt(secret: string, token: string): FastBuyJwtClaim
     return null;
   }
   return { sub: record.sub, iat: record.iat, exp: record.exp };
+}
+
+/** RFC 7519: the current time must be before `exp`. `exp` equal to the current second is expired. */
+export function fastBuyJwtUsable(claims: FastBuyJwtClaims, nowMs: number): boolean {
+  if (!Number.isInteger(claims.iat) || !Number.isInteger(claims.exp)) {
+    return false;
+  }
+  return Math.floor(nowMs / 1000) < claims.exp;
 }
 
 export function idTokenNonce(idToken: string): string | null {

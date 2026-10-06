@@ -140,3 +140,47 @@ export function legacyOrderGid(digits: string): string | null {
   }
   return `gid://shopify/Order/${digits}`;
 }
+
+/**
+ * Customer Account API ownership read. The search string is a variable.
+ * `customer.orders` is not `order(id:)`. The document does not select email.
+ */
+export const CUSTOMER_OWNED_ORDERS_DOCUMENT = `
+query CustomerOwnedOrders($query: String!) {
+  customer {
+    id
+    orders(first: 2, query: $query) {
+      nodes {
+        id
+        name
+      }
+    }
+  }
+}`;
+
+const ORDER_DIGITS = /^[0-9]+$/;
+
+/** Digit tokens on `customer.orders`: `name:#<digits>` first. Unquoted, as in the ownership plan. */
+export function customerOrdersNameQuery(digits: string): string | null {
+  if (!ORDER_DIGITS.test(digits)) {
+    return null;
+  }
+  return `name:#${digits}`;
+}
+
+/** `id:<digits>` on `customer.orders`. The node `id` must still equal the order GID. */
+export function customerOrdersIdQuery(digits: string): string | null {
+  if (!ORDER_DIGITS.test(digits)) {
+    return null;
+  }
+  return `id:${digits}`;
+}
+
+export function orderGidDigits(gid: string): string | null {
+  const match = /^gid:\/\/shopify\/Order\/([0-9]+)$/.exec(gid);
+  const digits = match?.[1];
+  if (digits === undefined || !ORDER_DIGITS.test(digits)) {
+    return null;
+  }
+  return digits;
+}
