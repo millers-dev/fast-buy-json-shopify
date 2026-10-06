@@ -334,7 +334,11 @@ describe("GET /api/fastbuyjson/orders/{orderId}", () => {
   });
 
   it("logs a fixed label when a rejected order id contains %0A or @", async () => {
-    const newline = await requestOrder(base, "/api/fastbuyjson/orders/%0Aorder%20status%20200%20owned");
+    const newline = await requestOrder(
+      base,
+      "/api/fastbuyjson/orders/%0Aorder%20status%20200%20owned",
+      authHeaders(),
+    );
     assertNotFound(newline);
     assert.equal(calls.length, 0);
     assert.deepEqual(logs, ["order status 404 rejected token customer-accounts-on"]);
@@ -743,10 +747,13 @@ describe("GET /api/fastbuyjson/orders/{orderId}", () => {
     const response = await getOrder(base, "1001");
     assertProblem(response, 500, "INTERNAL_ERROR");
     assert.equal((response.json as ProblemBody).detail, REINSTALL_DETAIL);
-    assert.equal(calls.length, 1);
+    assert.equal(calls.length, 2);
     assert.equal(calls[0]?.url, GRAPHQL_URL);
+    assert.equal(calls[1]?.url, `https://${SHOP}/admin/oauth/access_token`);
+    assert.equal(calls.some((call) => call.url.includes("/graphql.json")), false);
     assert.equal(response.headers.get("cache-control"), "no-store");
     assert.equal(response.text.includes(ADMIN_TOKEN), false);
+    assert.equal(response.text.includes(REFRESH_TOKEN), false);
   });
 
   it("sends Cache-Control no-store and advertises jwt", async () => {
