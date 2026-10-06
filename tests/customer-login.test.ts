@@ -380,6 +380,7 @@ describe("customer login handoff", () => {
       const session = harness.tokens.customer.getSession(SHOP, sub);
       assert.equal(session?.accessToken, CUSTOMER_ACCESS);
       assert.equal(session?.expiresAt, FIXED_NOW + 7_200_000);
+      assert.equal(session?.graphqlApi, GRAPHQL_URL);
       assertPlaintextAbsent(harness.file, [CUSTOMER_REFRESH, CUSTOMER_EMAIL, CUSTOMER_GID, ID_TOKEN_MARKER, done.pollToken, done.jwt, AUTH_CODE, done.userCode]);
 
       const claims = verifyFastBuyJwt(JWT_SECRET, done.jwt);

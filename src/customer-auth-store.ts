@@ -32,12 +32,17 @@ CREATE TABLE IF NOT EXISTS customer_login_poll (
   jwt_expires_in INTEGER
 )`;
 
+/**
+ * `graphql_api` is the discovered Customer Account API URL (vanity host kept).
+ * The row still does not hold the GID, the email, the id_token, or a refresh token.
+ */
 const SESSION_SCHEMA = `
 CREATE TABLE IF NOT EXISTS customer_session (
   sub TEXT PRIMARY KEY,
   token_nonce BLOB NOT NULL,
   token_ciphertext BLOB NOT NULL,
-  expires_at INTEGER NOT NULL
+  expires_at INTEGER NOT NULL,
+  graphql_api TEXT
 )`;
 
 const STATE_INDEX = `CREATE INDEX IF NOT EXISTS customer_login_poll_state ON customer_login_poll (state_hash)`;
@@ -81,6 +86,7 @@ export type StoredCustomerPoll = {
 export type CustomerSessionRecord = {
   accessToken: string;
   expiresAt: number;
+  graphqlApi: string | null;
 };
 
 export class CustomerAuthStore {
@@ -92,6 +98,7 @@ export class CustomerAuthStore {
   ) {
     this.db.run(POLL_SCHEMA);
     this.db.run(SESSION_SCHEMA);
+    this.ensureSessionGraphqlColumn();
     this.db.run(STATE_INDEX);
     this.db.run(COOKIE_INDEX);
   }
@@ -267,23 +274,36 @@ export class CustomerAuthStore {
     this.persist();
   }
 
-  saveSession(shopDomain: string, sub: string, accessToken: string, expiresAt: number): void {
+  saveSession(
+    shopDomain: string,
+    sub: string,
+    accessToken: string,
+    expiresAt: number,
+    graphqlApi?: string,
+  ): void {
     const token = encryptSecret(this.key, accessToken, sessionAad(shopDomain, sub));
     this.db.run(
-      `INSERT INTO customer_session (sub, token_nonce, token_ciphertext, expires_at)
-       VALUES (?, ?, ?, ?)
+      `INSERT INTO customer_session (sub, token_nonce, token_ciphertext, expires_at, graphql_api)
+       VALUES (?, ?, ?, ?, ?)
        ON CONFLICT(sub) DO UPDATE SET
          token_nonce = excluded.token_nonce,
          token_ciphertext = excluded.token_ciphertext,
-         expires_at = excluded.expires_at`,
-      [sub, new Uint8Array(token.nonce), new Uint8Array(token.ciphertext), expiresAt],
+         expires_at = excluded.expires_at,
+         graphql_api = excluded.graphql_api`,
+      [
+        sub,
+        new Uint8Array(token.nonce),
+        new Uint8Array(token.ciphertext),
+        expiresAt,
+        graphqlApi ?? null,
+      ],
     );
     this.persist();
   }
 
   getSession(shopDomain: string, sub: string): CustomerSessionRecord | null {
     const row = this.one(
-      `SELECT token_nonce, token_ciphertext, expires_at FROM customer_session WHERE sub = ?`,
+      `SELECT token_nonce, token_ciphertext, expires_at, graphql_api FROM customer_session WHERE sub = ?`,
       [sub],
     );
     if (row === undefined) {
@@ -297,7 +317,30 @@ export class CustomerAuthStore {
     if (expiresAt === null || accessToken === null) {
       this.failDecrypt();
     }
-    return { accessToken: accessToken ?? "", expiresAt: expiresAt ?? 0 };
+    return {
+      accessToken: accessToken ?? "",
+      expiresAt: expiresAt ?? 0,
+      graphqlApi: readOptionalString(row, "graphql_api"),
+    };
+  }
+
+  /** Databases created before the ownership read stored no Customer Account API URL. */
+  private ensureSessionGraphqlColumn(): void {
+    const stmt = this.db.prepare(`PRAGMA table_info(customer_session)`);
+    let found = false;
+    try {
+      while (stmt.step()) {
+        const row = stmt.getAsObject();
+        if (row.name === "graphql_api") {
+          found = true;
+        }
+      }
+    } finally {
+      stmt.free();
+    }
+    if (!found) {
+      this.db.run(`ALTER TABLE customer_session ADD COLUMN graphql_api TEXT`);
+    }
   }
 
   deleteSession(sub: string): boolean {

@@ -34,8 +34,9 @@ export function applyOrderAddressGate(deps: ConnectorDeps, env: NodeJS.ProcessEn
 }
 
 /**
- * Copies customer-login settings onto deps. Orders and `/detect` stay as they
- * are while `SHOPIFY_CUSTOMER_ACCOUNTS` is off. Ownership is a later change.
+ * Copies customer-login settings onto deps. While `SHOPIFY_CUSTOMER_ACCOUNTS`
+ * is off, orders stay anonymous and `/detect` does not advertise auth.
+ * While it is on, `GET /orders/{orderId}` requires the FastBuyJSON JWT.
  */
 export function applyCustomerAccounts(deps: ConnectorDeps, env: NodeJS.ProcessEnv): void {
   deps.customerAccounts = customerAccountsEnabled(env.SHOPIFY_CUSTOMER_ACCOUNTS);

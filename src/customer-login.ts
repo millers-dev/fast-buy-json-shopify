@@ -591,7 +591,13 @@ async function finishCallback(
   const sub = customerSub(secret, customerId);
   const jwt = signFastBuyJwt(jwtSecret, sub, deps.now(), lifetime);
   const tokenSeconds = Math.floor(exchanged.expiresIn);
-  deps.tokens.customer.saveSession(deps.app.shopDomain, sub, exchanged.accessToken, deps.now() + tokenSeconds * 1000);
+  deps.tokens.customer.saveSession(
+    deps.app.shopDomain,
+    sub,
+    exchanged.accessToken,
+    deps.now() + tokenSeconds * 1000,
+    prepared.graphqlApi,
+  );
   deps.tokens.customer.setOutcome({
     shopDomain: deps.app.shopDomain,
     loginIdHash: prepared.loginIdHash,

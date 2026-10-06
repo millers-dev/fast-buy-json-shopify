@@ -6,6 +6,7 @@ import { Ajv, type ValidateFunction } from "ajv";
 import addFormatsModule from "ajv-formats";
 
 import { prepareCommerceAccess } from "./commerce-token.js";
+import { resolveCustomerOwnership } from "./customer-order.js";
 import { installedProblem } from "./delegate-token.js";
 import type { ConnectorDeps } from "./deps.js";
 import { writeJson, writeProblem } from "./http-response.js";
@@ -83,6 +84,10 @@ export async function handleOrder(
   url: URL,
 ): Promise<void> {
   req.resume();
+  if (deps.customerAccounts === true) {
+    await handleCustomerOrder(req, res, deps, orderId);
+    return;
+  }
   const lookup = classifyOrderToken(orderId);
   if (lookup.kind === "reject") {
     finish(res, orderNotFound(), orderId, lookup);
@@ -96,29 +101,59 @@ export async function handleOrder(
   const addressGate = deps.orderAddressGate === true;
   const presentedEmail = addressGate ? singleQueryEmail(url) : undefined;
   const loaded = await loadOrder(deps, admin.token, lookup, addressGate, presentedEmail);
+  await writeOrderResult(res, loaded, orderId, lookup, false);
+}
+
+async function handleCustomerOrder(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: ConnectorDeps,
+  orderId: string,
+): Promise<void> {
+  const owned = await resolveCustomerOwnership(req, deps, orderId);
+  if (owned.kind === "problem") {
+    finish(res, owned.problem, orderId, owned.lookup, owned.headers, true);
+    return;
+  }
+  const admin = await readAdminToken(deps);
+  if (!admin.ok) {
+    finish(res, admin.problem, orderId, owned.lookup, {}, true);
+    return;
+  }
+  const loaded = await loadByOwnedGid(deps, admin.token, owned.gid, owned.idMode, owned.clientId);
+  await writeOrderResult(res, loaded, orderId, owned.lookup, true);
+}
+
+async function writeOrderResult(
+  res: ServerResponse,
+  loaded: LoadResult,
+  orderId: string,
+  lookup: OrderLookup,
+  customerAccounts: boolean,
+): Promise<void> {
   switch (loaded.kind) {
     case "ok":
       if (!validateOrderStatus(loaded.body)) {
-        finish(res, internalError("The order response could not be completed."), orderId, lookup);
+        finish(res, internalError("The order response could not be completed."), orderId, lookup, {}, customerAccounts);
         return;
       }
-      logOrder(200, orderId, lookup);
+      logOrder(200, orderId, lookup, customerAccounts);
       writeJson(res, 200, loaded.body, NO_STORE);
       return;
     case "not_found":
-      finish(res, orderNotFound(), orderId, lookup);
+      finish(res, orderNotFound(), orderId, lookup, {}, customerAccounts);
       return;
     case "throttled":
-      finish(res, rateLimited("Shopify throttled the order request."), orderId, lookup);
+      finish(res, rateLimited("Shopify throttled the order request."), orderId, lookup, {}, customerAccounts);
       return;
     case "reinstall":
-      finish(res, internalError(REINSTALL_DETAIL), orderId, lookup);
+      finish(res, internalError(REINSTALL_DETAIL), orderId, lookup, {}, customerAccounts);
       return;
     case "failed":
-      finish(res, internalError("The order request could not be completed."), orderId, lookup);
+      finish(res, internalError("The order request could not be completed."), orderId, lookup, {}, customerAccounts);
       return;
     case "invalid":
-      finish(res, internalError("The order response could not be completed."), orderId, lookup);
+      finish(res, internalError("The order response could not be completed."), orderId, lookup, {}, customerAccounts);
       return;
     default: {
       const unexpected: never = loaded;
@@ -220,6 +255,18 @@ async function loadById(
   addressGate: boolean,
   presentedEmail: string | undefined,
 ): Promise<LoadResult> {
+  return loadByOwnedGid(deps, token, gid, "name", "", addressGate, presentedEmail);
+}
+
+async function loadByOwnedGid(
+  deps: ConnectorDeps,
+  token: string,
+  gid: string,
+  idMode: IdMode,
+  clientId: string,
+  addressGate = false,
+  presentedEmail?: string,
+): Promise<LoadResult> {
   const hit = await orderOnce(deps, token, gid, addressGate);
   if (hit.kind !== "one") {
     if (hit.kind === "none" || hit.kind === "many") {
@@ -229,8 +276,8 @@ async function loadById(
   }
   return complete(
     hit.order,
-    "name",
-    "",
+    idMode,
+    clientId,
     (after) => orderPage(deps, token, gid, after),
     addressGate,
     presentedEmail,
@@ -461,13 +508,21 @@ async function readAdminToken(
   }
 }
 
-function finish(res: ServerResponse, problem: Problem, orderId: string, lookup: OrderLookup): void {
-  logOrder(problem.status, orderId, lookup);
-  writeProblem(res, problem);
+function finish(
+  res: ServerResponse,
+  problem: Problem,
+  orderId: string,
+  lookup: OrderLookup,
+  headers: Record<string, string> = {},
+  customerAccounts = false,
+): void {
+  logOrder(problem.status, orderId, lookup, customerAccounts);
+  writeProblem(res, problem, headers);
 }
 
-function logOrder(status: number, orderId: string, lookup: OrderLookup): void {
-  console.log(`order status ${status} ${orderLogLabel(orderId, lookup)}`);
+function logOrder(status: number, orderId: string, lookup: OrderLookup, customerAccounts = false): void {
+  const mode = customerAccounts ? " customer-accounts-on" : "";
+  console.log(`order status ${status} ${orderLogLabel(orderId, lookup)}${mode}`);
 }
 
 function orderLogLabel(orderId: string, lookup: OrderLookup): string {
