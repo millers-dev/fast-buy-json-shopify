@@ -99,7 +99,7 @@ export async function handleCustomerStart(
   if (req.method !== "POST") {
     req.resume();
     writeJson(res, 405, { error: "method_not_allowed" }, { Allow: "POST", "Cache-Control": "no-store" });
-    logCustomerLogin(deps, "start", 405);
+    logCustomerLogin("start", 405);
     return;
   }
   try {
@@ -107,7 +107,7 @@ export async function handleCustomerStart(
   } catch (error) {
     if (error instanceof RequestBodyTooLargeError) {
       writeJson(res, 413, { error: "payload_too_large" }, { "Cache-Control": "no-store" });
-      logCustomerLogin(deps, "start", 413);
+      logCustomerLogin("start", 413);
       return;
     }
     throw error;
@@ -115,7 +115,7 @@ export async function handleCustomerStart(
   const address = resolveClientAddress(req, deps);
   if (address.kind === "rejected") {
     writeProblem(res, rateLimited(CUSTOMER_RATE_DETAIL));
-    logCustomerLogin(deps, "start", 429);
+    logCustomerLogin("start", 429);
     return;
   }
   const admitted = await deps.tokens.exclusive(() => admitStart(deps, address.key));
@@ -123,19 +123,19 @@ export async function handleCustomerStart(
   switch (outcome.kind) {
     case "rate":
       writeProblem(res, rateLimited(CUSTOMER_RATE_DETAIL));
-      logCustomerLogin(deps, "start", 429);
+      logCustomerLogin("start", 429);
       return;
     case "app-url":
       writeProblem(res, internalError(CUSTOMER_APP_URL_DETAIL));
-      logCustomerLogin(deps, "start", 500);
+      logCustomerLogin("start", 500);
       return;
     case "discovery":
       writeProblem(res, internalError(CUSTOMER_DISCOVERY_DETAIL));
-      logCustomerLogin(deps, "start", 500);
+      logCustomerLogin("start", 500);
       return;
     case "ok":
       writeJson(res, 200, outcome.body, { "Cache-Control": "no-store" });
-      logCustomerLogin(deps, "start", 200);
+      logCustomerLogin("start", 200);
       return;
     default: {
       const neverOutcome: never = outcome;
@@ -153,24 +153,24 @@ export async function handleCustomerLogin(
   if (req.method !== "GET") {
     req.resume();
     writeJson(res, 405, { error: "method_not_allowed" }, { Allow: "GET", "Cache-Control": "no-store" });
-    logCustomerLogin(deps, "login", 405);
+    logCustomerLogin("login", 405);
     return;
   }
   if (!loginSecretShape(loginId)) {
     writeHtml(res, 400, CUSTOMER_LOGIN_INVALID_PAGE);
-    logCustomerLogin(deps, "login", 400);
+    logCustomerLogin("login", 400);
     return;
   }
   const opened = await deps.tokens.exclusive(async () => openLoginLink(deps, loginId));
   if (opened.kind === "invalid") {
     writeHtml(res, 400, CUSTOMER_LOGIN_INVALID_PAGE);
-    logCustomerLogin(deps, "login", 400);
+    logCustomerLogin("login", 400);
     return;
   }
   writeHtml(res, 200, customerLoginPage(loginId, opened.userCode), {
     "Set-Cookie": loginCookie(opened.cookie),
   });
-  logCustomerLogin(deps, "login", 200);
+  logCustomerLogin("login", 200);
 }
 
 export async function handleCustomerContinue(
@@ -182,21 +182,21 @@ export async function handleCustomerContinue(
   if (req.method !== "POST") {
     req.resume();
     writeJson(res, 405, { error: "method_not_allowed" }, { Allow: "POST", "Cache-Control": "no-store" });
-    logCustomerLogin(deps, "continue", 405);
+    logCustomerLogin("continue", 405);
     return;
   }
   req.resume();
   const cookie = readLoginCookie(headerValue(req, "cookie"));
   if (cookie === undefined || !loginSecretShape(cookie) || !loginSecretShape(loginId) || deps.app.appUrl === undefined) {
     writeHtml(res, 400, CUSTOMER_LOGIN_INVALID_PAGE);
-    logCustomerLogin(deps, "continue", 400);
+    logCustomerLogin("continue", 400);
     return;
   }
   const appUrl = deps.app.appUrl;
   const location = await deps.tokens.exclusive(async () => continueLogin(deps, loginId, cookie, appUrl));
   if (location === null) {
     writeHtml(res, 400, CUSTOMER_LOGIN_INVALID_PAGE);
-    logCustomerLogin(deps, "continue", 400);
+    logCustomerLogin("continue", 400);
     return;
   }
   res.writeHead(302, {
@@ -205,7 +205,7 @@ export async function handleCustomerContinue(
     "Referrer-Policy": "no-referrer",
   });
   res.end();
-  logCustomerLogin(deps, "continue", 302);
+  logCustomerLogin("continue", 302);
 }
 
 export async function handleCustomerCallback(
@@ -217,7 +217,7 @@ export async function handleCustomerCallback(
   if (req.method !== "GET") {
     req.resume();
     writeJson(res, 405, { error: "method_not_allowed" }, { Allow: "GET", "Cache-Control": "no-store" });
-    logCustomerLogin(deps, "callback", 405);
+    logCustomerLogin("callback", 405);
     return;
   }
   const cookie = readLoginCookie(headerValue(req, "cookie"));
@@ -231,19 +231,19 @@ export async function handleCustomerCallback(
     deps.app.appUrl === undefined
   ) {
     writeHtml(res, 400, CUSTOMER_LOGIN_INVALID_PAGE);
-    logCustomerLogin(deps, "callback", 400);
+    logCustomerLogin("callback", 400);
     return;
   }
   const appUrl = deps.app.appUrl;
   const prepared = await deps.tokens.exclusive(async () => prepareCallback(deps, cookie, state));
   if (prepared.kind === "reject") {
     writeHtml(res, 400, CUSTOMER_LOGIN_INVALID_PAGE);
-    logCustomerLogin(deps, "callback", 400);
+    logCustomerLogin("callback", 400);
     return;
   }
   if (prepared.kind === "internal") {
     writeProblem(res, internalError(CUSTOMER_LOGIN_INCOMPLETE_DETAIL), NO_REFERRER);
-    logCustomerLogin(deps, "callback", 500);
+    logCustomerLogin("callback", 500);
     return;
   }
   if (code === undefined || code === "") {
@@ -257,7 +257,7 @@ export async function handleCustomerCallback(
       });
     });
     writeHtml(res, 200, CUSTOMER_LOGIN_CLOSE_PAGE);
-    logCustomerLogin(deps, "callback", 200);
+    logCustomerLogin("callback", 200);
     return;
   }
   const exchanged = await exchangeCustomerCode({
@@ -286,11 +286,11 @@ export async function handleCustomerCallback(
   );
   if (finished === "internal") {
     writeProblem(res, internalError(CUSTOMER_LOGIN_INCOMPLETE_DETAIL), NO_REFERRER);
-    logCustomerLogin(deps, "callback", 500);
+    logCustomerLogin("callback", 500);
     return;
   }
   writeHtml(res, 200, CUSTOMER_LOGIN_CLOSE_PAGE);
-  logCustomerLogin(deps, "callback", 200);
+  logCustomerLogin("callback", 200);
 }
 
 export async function handleCustomerPoll(
@@ -301,7 +301,7 @@ export async function handleCustomerPoll(
   if (req.method !== "POST") {
     req.resume();
     writeJson(res, 405, { error: "method_not_allowed" }, { Allow: "POST", "Cache-Control": "no-store" });
-    logCustomerLogin(deps, "poll", 405);
+    logCustomerLogin("poll", 405);
     return;
   }
   let pollToken: string | undefined;
@@ -310,29 +310,29 @@ export async function handleCustomerPoll(
   } catch (error) {
     if (error instanceof RequestBodyTooLargeError) {
       writeJson(res, 413, { error: "payload_too_large" }, { "Cache-Control": "no-store" });
-      logCustomerLogin(deps, "poll", 413);
+      logCustomerLogin("poll", 413);
       return;
     }
     throw error;
   }
   if (pollToken === undefined) {
     writeProblem(res, invalidToken());
-    logCustomerLogin(deps, "poll", 401);
+    logCustomerLogin("poll", 401);
     return;
   }
   const outcome = await deps.tokens.exclusive(async () => readPoll(deps, pollToken));
   switch (outcome.kind) {
     case "invalid":
       writeProblem(res, invalidToken());
-      logCustomerLogin(deps, "poll", 401);
+      logCustomerLogin("poll", 401);
       return;
     case "rate":
       writeProblem(res, rateLimited(CUSTOMER_RATE_DETAIL));
-      logCustomerLogin(deps, "poll", 429);
+      logCustomerLogin("poll", 429);
       return;
     case "pending":
       writeJson(res, 200, { status: "pending" }, { "Cache-Control": "no-store" });
-      logCustomerLogin(deps, "poll", 200);
+      logCustomerLogin("poll", 200);
       return;
     case "complete":
       writeJson(
@@ -346,15 +346,15 @@ export async function handleCustomerPoll(
         },
         { "Cache-Control": "no-store" },
       );
-      logCustomerLogin(deps, "poll", 200);
+      logCustomerLogin("poll", 200);
       return;
     case "misconfigured":
       writeProblem(res, internalError(CUSTOMER_MISCONFIGURED_DETAIL));
-      logCustomerLogin(deps, "poll", 500);
+      logCustomerLogin("poll", 500);
       return;
     case "internal":
       writeProblem(res, internalError(CUSTOMER_LOGIN_INCOMPLETE_DETAIL));
-      logCustomerLogin(deps, "poll", 500);
+      logCustomerLogin("poll", 500);
       return;
     default: {
       const neverOutcome: never = outcome;
@@ -728,7 +728,6 @@ function writeHtml(res: ServerResponse, status: number, html: string, extra: Rec
   res.end(html);
 }
 
-function logCustomerLogin(deps: ConnectorDeps, step: string, status: number): void {
-  const mode = deps.customerAccounts === true ? "on" : "off";
-  console.info(`customer-login ${step} ${status} customer-accounts-${mode}`);
+function logCustomerLogin(step: string, status: number): void {
+  console.info(`customer-login ${step} ${status} customer-accounts-on`);
 }

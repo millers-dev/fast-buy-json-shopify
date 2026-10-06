@@ -17,10 +17,6 @@ export type ConnectorDeps = {
   fetch: typeof fetch;
   now: () => number;
   sleep?: (ms: number) => Promise<void>;
-  /** From `SHOPIFY_ORDER_ADDRESS_GATE` at startup. Absent or false keeps addresses off. */
-  orderAddressGate?: boolean;
-  /** From `SHOPIFY_CUSTOMER_ACCOUNTS` at startup. Absent or false keeps orders anonymous. */
-  customerAccounts?: boolean;
   /** From `SHOPIFY_TRUSTED_PROXY_HOPS` at startup. Absent means 0. */
   trustedProxyHops?: number;
   /** UTF-8, at least 32 bytes, when `SHOPIFY_CUSTOMER_SUB_SECRET` is set. */

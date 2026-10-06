@@ -92,28 +92,6 @@ export function loadShopifyAuth(env: NodeJS.ProcessEnv): ShopifyAuthConfig | und
 }
 
 /**
- * Street addresses are copied onto the order response only when this is on.
- * On is the trimmed value `1` or `true`, compared case-insensitively.
- * Unset, empty, `0`, `false`, `off`, and every other value are off.
- */
-export function orderAddressGateEnabled(raw: string | undefined): boolean {
-  if (raw === undefined) {
-    return false;
-  }
-  const value = raw.trim().toLowerCase();
-  return value === "1" || value === "true";
-}
-
-/**
- * Customer-account login is on only when the trimmed value is `1` or `true`,
- * compared case-insensitively. Unset, empty, `0`, `false`, and every other
- * value are off. Off keeps anonymous orders and does not advertise auth.
- */
-export function customerAccountsEnabled(raw: string | undefined): boolean {
-  return orderAddressGateEnabled(raw);
-}
-
-/**
  * Unset or `""` is 0 (socket address, `X-Forwarded-For` ignored).
  * A set value is trimmed, then accepted only when it matches `^[0-9]+$`
  * and the integer is 0 through 10. Anything else refuses process start.

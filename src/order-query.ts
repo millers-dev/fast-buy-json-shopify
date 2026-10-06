@@ -13,16 +13,17 @@
  * Line prices are `discountedUnitPriceSet` / `originalUnitPriceSet` and
  * `discountedTotalSet` / `originalTotalSet`.
  * The selection set does not read phone, customer name, `CardPaymentDetails`,
- * or the Order GID. `email`, `shippingAddress`, and `billingAddress` are added
- * only when `SHOPIFY_ORDER_ADDRESS_GATE` is on. When `SHOPIFY_CUSTOMER_ACCOUNTS`
- * is on, the owned `order(id:)` read adds `shippingAddress` and `billingAddress`
- * and does not add `email`. That address selection is
+ * `email`, or the Order GID. The owned `order(id:)` read adds `shippingAddress`
+ * and `billingAddress` and does not add `email`. That address selection is
  * `address1`, `address2`, `city`, `province`, `countryCodeV2`, and `zip`.
  * It does not read `displayAddress`, `country`, `countryCode`, or `provinceCode`.
+ * Later line-item pages use the address-free selection.
+ * `SHOPIFY_ORDER_ADDRESS_GATE` and `?email=` were removed. Addresses are mapped
+ * only for the authenticated owner.
  */
 
 /** Which address fields an Admin order read selects, and how field errors are classified. */
-export type OrderAddressRead = "off" | "gate" | "owner";
+export type OrderAddressRead = "off" | "owner";
 
 export const ORDER_LINE_PAGE = 50;
 export const ORDER_TRACKING_CAP = 10;
@@ -90,15 +91,10 @@ const MAILING_ADDRESS_FIELDS = `
       zip
     }`;
 
-const ADDRESS_FIELDS = `
-    email${MAILING_ADDRESS_FIELDS}`;
-
 function orderFields(read: OrderAddressRead): string {
   switch (read) {
     case "off":
       return ORDER_FIELDS;
-    case "gate":
-      return `${ORDER_FIELDS}${ADDRESS_FIELDS}`;
     case "owner":
       return `${ORDER_FIELDS}${MAILING_ADDRESS_FIELDS}`;
     default: {
@@ -108,20 +104,11 @@ function orderFields(read: OrderAddressRead): string {
   }
 }
 
-export const ORDER_BY_ID_DOCUMENT = orderByIdDocument(false);
+/** Later line-item pages. No mailing addresses and no `email`. */
+export const ORDER_BY_ID_DOCUMENT = orderByIdDocumentFor("off");
 
-export const ORDERS_BY_QUERY_DOCUMENT = ordersByQueryDocument(false);
-
-export const ORDER_BY_ID_ADDRESS_DOCUMENT = orderByIdDocument(true);
-
-export const ORDERS_BY_QUERY_ADDRESS_DOCUMENT = ordersByQueryDocument(true);
-
-/** Owned Admin order while customer accounts are on. Addresses, no `email`. */
+/** Owned Admin order. Addresses, no `email`. */
 export const ORDER_BY_ID_OWNER_ADDRESS_DOCUMENT = orderByIdDocumentFor("owner");
-
-export function orderByIdDocument(addressGate: boolean): string {
-  return orderByIdDocumentFor(addressGate ? "gate" : "off");
-}
 
 function orderByIdDocumentFor(read: OrderAddressRead): string {
   return `
@@ -131,25 +118,7 @@ query OrderById($id: ID!, $after: String) {
 }`;
 }
 
-export function ordersByQueryDocument(addressGate: boolean): string {
-  return `
-query OrdersByQuery($query: String!, $after: String) {
-  orders(first: 2, query: $query) {
-    nodes {${orderFields(addressGate ? "gate" : "off")}
-    }
-  }
-}`;
-}
-
 const SEARCH_VALUE = /^[A-Za-z0-9_-]+$/;
-
-/** Digit tokens: name first. The value is passed as a GraphQL variable, not interpolated into the document. */
-export function nameSearchQuery(digits: string): string | null {
-  if (!SEARCH_VALUE.test(digits)) {
-    return null;
-  }
-  return `name:"#${digits}"`;
-}
 
 /** Name or confirmation number. Exactly one node is a match. */
 export function tokenSearchQuery(value: string): string | null {
@@ -157,13 +126,6 @@ export function tokenSearchQuery(value: string): string | null {
     return null;
   }
   return `name:"${value}" OR name:"#${value}" OR confirmation_number:"${value}"`;
-}
-
-export function legacyOrderGid(digits: string): string | null {
-  if (!/^[0-9]+$/.test(digits)) {
-    return null;
-  }
-  return `gid://shopify/Order/${digits}`;
 }
 
 /**

@@ -10,7 +10,10 @@ export const SUPPORTED_FEATURES = [
   "hosted_checkout",
 ] as const;
 
-export const ENDPOINTS = ["products", "cart", "checkout", "orders"] as const;
+export const ENDPOINTS = ["products", "cart", "checkout", "orders", "auth"] as const;
+
+/** Relative to the API root. Cart and checkout stay anonymous; orders require `jwt`. */
+export const AUTH_ENDPOINTS = ["/auth/customer/start"] as const;
 
 export type DetectResponse = {
   standard: "FastBuyJSON";
@@ -23,8 +26,11 @@ export type DetectResponse = {
     discounts: { stackable: false; maxCodes: 1 };
     checkout: { handoff: "shopify_hosted"; confirmCreatesOrder: false };
   };
-  endpoints: readonly ["products", "cart", "checkout", "orders"];
-  authentication: { methods: readonly ["anonymous"] };
+  endpoints: readonly ["products", "cart", "checkout", "orders", "auth"];
+  authentication: {
+    methods: readonly ["anonymous", "jwt"];
+    endpoints: readonly ["/auth/customer/start"];
+  };
   merchantInfo?: { name: string; url: string };
 };
 
@@ -45,7 +51,7 @@ export function buildDetectResponse(config: ConnectorConfig): DetectResponse {
       checkout: { handoff: "shopify_hosted", confirmCreatesOrder: false },
     },
     endpoints: ENDPOINTS,
-    authentication: { methods: ["anonymous"] },
+    authentication: { methods: ["anonymous", "jwt"], endpoints: AUTH_ENDPOINTS },
   };
 
   if (config.shopDomain === undefined) {

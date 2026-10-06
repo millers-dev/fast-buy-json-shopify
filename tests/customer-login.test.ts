@@ -7,11 +7,7 @@ import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 
 import { SHOPIFY_API_VERSION } from "../src/api-version.js";
-import {
-  customerAccountsEnabled,
-  readCustomerSubSecret,
-  readTrustedProxyHops,
-} from "../src/config.js";
+import { readCustomerSubSecret, readTrustedProxyHops } from "../src/config.js";
 import {
   CUSTOMER_LOGIN_GRANT_SENTENCE,
   clientAddressForLogin,
@@ -115,14 +111,6 @@ describe("customer login configuration", () => {
     });
   });
 
-  it("treats customer accounts as off unless the value is 1 or true", () => {
-    for (const value of [undefined, "", "   ", "0", "false", "off", "yes", "no"]) {
-      assert.equal(customerAccountsEnabled(value), false);
-    }
-    assert.equal(customerAccountsEnabled("1"), true);
-    assert.equal(customerAccountsEnabled(" TRUE "), true);
-  });
-
   it("normalizes IPv6 to the lowercase RFC 5952 form and keeps IPv4", () => {
     assert.equal(normalizeIp("2001:0db8:0000:0000:0000:0000:0000:0001"), "2001:db8::1");
     assert.equal(normalizeIp("2001:DB8::1"), "2001:db8::1");
@@ -186,14 +174,18 @@ describe("customer login configuration", () => {
 });
 
 describe("customer login handoff", () => {
-  it("keeps /detect free of auth while the flag is off and still serves start", async () => {
+  it("advertises jwt on /detect without a flag and still serves start", async () => {
     await withHarness(async (harness) => {
       const detect = await send(harness.base, "/api/fastbuyjson/detect");
       assert.equal(detect.status, 200);
       assert.equal(detect.headers["cache-control"], "public, max-age=300");
-      const body = JSON.parse(detect.text) as { endpoints: string[]; authentication: { methods: string[] } };
-      assert.equal(body.endpoints.includes("auth"), false);
-      assert.deepEqual(body.authentication.methods, ["anonymous"]);
+      const body = JSON.parse(detect.text) as {
+        endpoints: string[];
+        authentication: { methods: string[]; endpoints?: string[] };
+      };
+      assert.equal(body.endpoints.includes("auth"), true);
+      assert.deepEqual(body.authentication.methods, ["anonymous", "jwt"]);
+      assert.deepEqual(body.authentication.endpoints, ["/auth/customer/start"]);
       const started = await startLogin(harness);
       assert.equal(started.status, 200);
       assert.equal(new URL(started.body.loginUrl).search, "");
@@ -201,16 +193,6 @@ describe("customer login handoff", () => {
       assert.equal(started.body.loginUrl.includes("pollToken"), false);
       assert.match(started.body.userCode, /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{4}-[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{4}$/);
     });
-  });
-
-  it("does not advertise auth when the flag is on", async () => {
-    await withHarness(async (harness) => {
-      harness.deps.customerAccounts = true;
-      const detect = await send(harness.base, "/api/fastbuyjson/detect");
-      const body = JSON.parse(detect.text) as { endpoints: string[]; authentication: { methods: string[] } };
-      assert.equal(body.endpoints.includes("auth"), false);
-      assert.deepEqual(body.authentication.methods, ["anonymous"]);
-    }, { customerAccounts: true });
   });
 
   it("does not hold the token store lock during discovery", async () => {
@@ -775,7 +757,7 @@ type Harness = {
 
 async function withHarness(
   fn: (harness: Harness) => Promise<void>,
-  options: { appUrl?: false; hops?: number; subSecret?: false; customerAccounts?: boolean } = {},
+  options: { appUrl?: false; hops?: number; subSecret?: false } = {},
 ): Promise<void> {
   const file = join(mkdtempSync(join(tmpdir(), "fastbuyjson-customer-")), "tokens.sqlite");
   const tokens = await TokenStore.open(file, Buffer.from("k".repeat(32)));
@@ -843,7 +825,6 @@ async function withHarness(
       return jsonResponse(500, { error: "unexpected-url" });
     },
     now: () => now,
-    customerAccounts: options.customerAccounts === true,
     trustedProxyHops: options.hops ?? 0,
     ...(options.subSecret === false ? {} : { customerSubSecret: SUB_SECRET, jwtSecret: JWT_SECRET }),
   };
