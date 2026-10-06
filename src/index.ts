@@ -31,7 +31,7 @@ export function start(env: NodeJS.ProcessEnv = process.env): void {
  * `GET /orders/{orderId}` requires the FastBuyJSON JWT. `SHOPIFY_CUSTOMER_ACCOUNTS`
  * and `SHOPIFY_ORDER_ADDRESS_GATE` are not read.
  */
-export function applyCustomerAccounts(deps: ConnectorDeps, env: NodeJS.ProcessEnv): void {
+export function applyCustomerLoginSecrets(deps: ConnectorDeps, env: NodeJS.ProcessEnv): void {
   deps.trustedProxyHops = readTrustedProxyHops(env.SHOPIFY_TRUSTED_PROXY_HOPS);
   const subSecret = readCustomerSubSecret(env.SHOPIFY_CUSTOMER_SUB_SECRET);
   if (subSecret !== undefined) {
@@ -51,7 +51,7 @@ async function boot(
 ): Promise<void> {
   const deps = auth === undefined ? undefined : await openConnector(auth);
   if (deps !== undefined) {
-    applyCustomerAccounts(deps, env);
+    applyCustomerLoginSecrets(deps, env);
   }
   const server = createConnectorServer(config, deps);
   const bound = await listen(server, port);

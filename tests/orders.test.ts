@@ -793,7 +793,7 @@ describe("GET /api/fastbuyjson/orders/{orderId}", () => {
     assert.equal(/\bemail\b/.test(graphqlCall(calls, 1).query), false);
     assert.equal(response.text.includes("other@example.com"), false);
     assert.equal(logs.join("\n").includes("email="), false);
-    assertGateLogs(logs, errors);
+    assertLogsOmitEmailAndAddresses(logs, errors);
 
     calls.length = 0;
     const anonymous = await getOrder(base, "1001", {}, "email=buyer@example.com");
@@ -1042,7 +1042,7 @@ function assertAddressFree(text: string): void {
   }
 }
 
-function assertGateLogs(seenLogs: string[], seenErrors: string[]): void {
+function assertLogsOmitEmailAndAddresses(seenLogs: string[], seenErrors: string[]): void {
   const text = `${seenLogs.join("\n")}\n${seenErrors.join("\n")}`;
   assertAddressFree(text);
   assert.equal(text.includes("email="), false);
