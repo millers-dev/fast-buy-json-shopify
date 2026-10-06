@@ -31,6 +31,7 @@ import {
   discoverCustomerAccounts,
   exchangeCustomerCode,
   fetchCustomerId,
+  type CustomerDiscovery,
 } from "./customer-login-shopify.js";
 import type { ConnectorDeps } from "./deps.js";
 import { writeJson, writeProblem } from "./http-response.js";
@@ -117,7 +118,8 @@ export async function handleCustomerStart(
     logCustomerLogin(deps, "start", 429);
     return;
   }
-  const outcome = await deps.tokens.exclusive(async () => beginStart(deps, address.key));
+  const admitted = await deps.tokens.exclusive(() => admitStart(deps, address.key));
+  const outcome = await finishStart(deps, admitted);
   switch (outcome.kind) {
     case "rate":
       writeProblem(res, rateLimited(CUSTOMER_RATE_DETAIL));
@@ -370,7 +372,20 @@ type StartOutcome =
       body: { loginUrl: string; pollToken: string; userCode: string; expiresAt: string };
     };
 
-async function beginStart(deps: ConnectorDeps, addressKey: string): Promise<StartOutcome> {
+async function finishStart(deps: ConnectorDeps, admitted: StartAdmission): Promise<StartOutcome> {
+  if (admitted.kind !== "discover") {
+    return admitted;
+  }
+  const discovery = await discoverCustomerAccounts(deps.app.shopDomain, deps.fetch);
+  if (discovery === null) {
+    return { kind: "discovery" };
+  }
+  return deps.tokens.exclusive(() => commitStart(deps, discovery));
+}
+
+type StartAdmission = { kind: "rate" } | { kind: "app-url" } | { kind: "discover" };
+
+async function admitStart(deps: ConnectorDeps, addressKey: string): Promise<StartAdmission> {
   const now = deps.now();
   deps.tokens.customer.purge(now);
   const attempts = attemptLog(deps);
@@ -384,9 +399,18 @@ async function beginStart(deps: ConnectorDeps, addressKey: string): Promise<Star
   if (deps.app.appUrl === undefined) {
     return { kind: "app-url" };
   }
-  const discovery = await discoverCustomerAccounts(deps.app.shopDomain, deps.fetch);
-  if (discovery === null) {
-    return { kind: "discovery" };
+  return { kind: "discover" };
+}
+
+async function commitStart(deps: ConnectorDeps, discovery: CustomerDiscovery): Promise<StartOutcome> {
+  const appUrl = deps.app.appUrl;
+  if (appUrl === undefined) {
+    return { kind: "app-url" };
+  }
+  const now = deps.now();
+  deps.tokens.customer.purge(now);
+  if (deps.tokens.customer.countLive(now) >= CUSTOMER_LIVE_POLL_CAP) {
+    return { kind: "rate" };
   }
   const loginId = createLoginSecret();
   const pollToken = createLoginSecret();
@@ -408,7 +432,7 @@ async function beginStart(deps: ConnectorDeps, addressKey: string): Promise<Star
   return {
     kind: "ok",
     body: {
-      loginUrl: `${deps.app.appUrl}/api/fastbuyjson/auth/customer/login/${loginId}`,
+      loginUrl: `${appUrl}/api/fastbuyjson/auth/customer/login/${loginId}`,
       pollToken,
       userCode,
       expiresAt: new Date(expiresAt).toISOString(),
@@ -610,6 +634,7 @@ async function readPoll(deps: ConnectorDeps, pollToken: string): Promise<PollOut
     deps.tokens.customer.deleteByPollHash(poll.pollTokenHash);
     return { kind: "complete", accessToken, expiresIn };
   }
+  // Invalid and misconfigured rows stay until expiresAt. A later poll still reports that outcome.
   if (poll.outcome === "misconfigured") {
     return { kind: "misconfigured" };
   }

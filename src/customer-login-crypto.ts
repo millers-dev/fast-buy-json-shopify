@@ -25,6 +25,7 @@ export const LOGIN_COOKIE_MAX_AGE_SECONDS = 600;
 const USER_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const CUSTOMER_GID = /^gid:\/\/shopify\/Customer\/\d+$/;
 
+/** Per-process start counter. It is not written to SQLite and resets when the process restarts. */
 export class LoginAttemptLog {
   private readonly buckets = new Map<string, number[]>();
 
@@ -104,6 +105,9 @@ export type FastBuyJwtClaims = {
   exp: number;
 };
 
+/**
+ * Checks the HMAC and the claim set. Expiry is enforced when an order read accepts the JWT (PR 3).
+ */
 export function verifyFastBuyJwt(secret: string, token: string): FastBuyJwtClaims | null {
   const parts = token.split(".");
   if (parts.length !== 3) {

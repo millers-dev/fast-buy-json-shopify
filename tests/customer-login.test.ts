@@ -213,6 +213,46 @@ describe("customer login handoff", () => {
     }, { customerAccounts: true });
   });
 
+  it("does not hold the token store lock during discovery", async () => {
+    await withHarness(async (harness) => {
+      let releaseDiscovery = (): void => {};
+      const released = new Promise<void>((resolve) => {
+        releaseDiscovery = resolve;
+      });
+      let markEntered = (): void => {};
+      const entered = new Promise<void>((resolve) => {
+        markEntered = resolve;
+      });
+      harness.delayDiscovery = async () => {
+        markEntered();
+        await released;
+      };
+      const pending = send(harness.base, "/api/fastbuyjson/auth/customer/start", { method: "POST" });
+      try {
+        const reached = await Promise.race([
+          entered.then(() => "entered" as const),
+          new Promise<"timeout">((resolve) => {
+            setTimeout(() => resolve("timeout"), 2_000);
+          }),
+        ]);
+        assert.equal(reached, "entered");
+        const locked = await Promise.race([
+          harness.tokens.exclusive(async () => "free" as const),
+          new Promise<"held">((resolve) => {
+            setTimeout(() => resolve("held"), 500);
+          }),
+        ]);
+        assert.equal(locked, "free");
+        releaseDiscovery();
+        const response = await pending;
+        assert.equal(response.status, 200);
+        assert.equal(harness.tokens.customer.countLive(FIXED_NOW), 1);
+      } finally {
+        releaseDiscovery();
+      }
+    });
+  });
+
   it("returns 500 when discovery is missing or not JSON and writes no poll row", async () => {
     await withHarness(async (harness) => {
       harness.openidStatus = 404;
@@ -728,6 +768,7 @@ type Harness = {
   tokenWwwAuthenticate: string | undefined;
   onToken: (() => Response) | undefined;
   onGraphql: (() => Response) | undefined;
+  delayDiscovery: (() => Promise<void>) | null;
   close: () => Promise<void>;
 };
 
@@ -746,6 +787,7 @@ async function withHarness(
     openidStatus: 200,
     openidBody: OPENID,
     tokenStatus: 200,
+    delayDiscovery: null,
     setNow: (value: number) => {
       now = value;
     },
@@ -767,6 +809,9 @@ async function withHarness(
       const body = requestBody(init?.body);
       calls.push({ url, headers, body });
       if (url.endsWith("/.well-known/openid-configuration")) {
+        if (harness.delayDiscovery !== null) {
+          await harness.delayDiscovery();
+        }
         if (harness.openidStatus !== 200) {
           return new Response("missing", { status: harness.openidStatus });
         }
@@ -929,6 +974,9 @@ function requestBody(body: unknown): string {
   if (body instanceof URLSearchParams) {
     return body.toString();
   }
+  if (Buffer.isBuffer(body) || body instanceof Uint8Array) {
+    return Buffer.from(body).toString("utf8");
+  }
   return "";
 }
 
@@ -984,9 +1032,9 @@ function header(headers: IncomingHttpHeaders, name: string): string | undefined 
 
 function setCookie(headers: IncomingHttpHeaders): string {
   const value = headers["set-cookie"];
-  assert.ok(Array.isArray(value));
-  assert.equal(value.length, 1);
-  return value[0] ?? "";
+  const cookie = Array.isArray(value) ? value[0] : value;
+  assert.equal(typeof cookie, "string");
+  return cookie ?? "";
 }
 
 function cookieValue(headerValue: string): string {
