@@ -1,6 +1,6 @@
 import { pathToFileURL } from "node:url";
 
-import { loadConfig, loadShopifyAuth, readPort } from "./config.js";
+import { loadConfig, loadShopifyAuth, orderAddressGateEnabled, readPort } from "./config.js";
 import { DEFAULT_PORT, createConnectorServer, listen } from "./server.js";
 import { openConnector } from "./startup.js";
 import { readPackageMetadata } from "./version.js";
@@ -10,7 +10,8 @@ export function start(env: NodeJS.ProcessEnv = process.env): void {
   const config = loadConfig(env, metadata.version);
   const port = readPort(env, DEFAULT_PORT);
   const auth = loadShopifyAuth(env);
-  void boot(config, port, auth).catch((error: unknown) => {
+  const orderAddressGate = orderAddressGateEnabled(env.SHOPIFY_ORDER_ADDRESS_GATE);
+  void boot(config, port, auth, orderAddressGate).catch((error: unknown) => {
     console.error(error instanceof Error ? error.message : "failed to start");
     process.exit(1);
   });
@@ -20,8 +21,12 @@ async function boot(
   config: ReturnType<typeof loadConfig>,
   port: number,
   auth: ReturnType<typeof loadShopifyAuth>,
+  orderAddressGate: boolean,
 ): Promise<void> {
   const deps = auth === undefined ? undefined : await openConnector(auth);
+  if (deps !== undefined) {
+    deps.orderAddressGate = orderAddressGate;
+  }
   const server = createConnectorServer(config, deps);
   const bound = await listen(server, port);
   const shop = config.shopDomain ?? "unset";

@@ -41,6 +41,8 @@ type GraphqlArgs = {
   buyerIp?: string;
   fetch: typeof fetch;
   sleep: (ms: number) => Promise<void>;
+  /** When true, only email and mailing-address paths count as field redaction. */
+  addressGate?: boolean;
 };
 
 export async function shopifyGraphql(args: GraphqlArgs): Promise<ShopifyCall> {
@@ -88,7 +90,7 @@ async function orderCallOnce(args: GraphqlArgs): Promise<OrderAdminCall> {
   if (fetched.kind !== "http") {
     return fetched;
   }
-  return classifyOrderPayload(fetched.status, fetched.payload);
+  return classifyOrderPayload(fetched.status, fetched.payload, args.addressGate === true);
 }
 
 async function fetchGraphql(args: GraphqlArgs): Promise<FetchedGraphql> {
@@ -119,7 +121,9 @@ async function fetchGraphql(args: GraphqlArgs): Promise<FetchedGraphql> {
   return { kind: "http", status: response.status, ok: response.ok, payload };
 }
 
-function classifyOrderPayload(status: number, payload: unknown): OrderAdminCall {
+const ADDRESS_LEAVES = new Set(["address1", "address2", "city", "province", "countryCodeV2", "zip"]);
+
+function classifyOrderPayload(status: number, payload: unknown, addressGate: boolean): OrderAdminCall {
   if (status === 401 || hasRootAccessDenied(payload)) {
     return { kind: "reinstall" };
   }
@@ -132,6 +136,15 @@ function classifyOrderPayload(status: number, payload: unknown): OrderAdminCall 
   if (!hasErrors(payload)) {
     return { kind: "ok", data: payload.data };
   }
+  if (addressGate) {
+    if (errorsAreAddressGateRedactions(payload.errors) && orderPayloadPopulated(payload.data)) {
+      return { kind: "ok", data: payload.data };
+    }
+    if (hasAccessDenied(payload) && !orderPayloadPopulated(payload.data)) {
+      return { kind: "reinstall" };
+    }
+    return { kind: "failed" };
+  }
   if (errorsAreFieldRedactions(payload.errors) && orderPayloadPopulated(payload.data)) {
     return { kind: "ok", data: payload.data };
   }
@@ -139,6 +152,32 @@ function classifyOrderPayload(status: number, payload: unknown): OrderAdminCall 
     return { kind: "reinstall" };
   }
   return { kind: "failed" };
+}
+
+function errorsAreAddressGateRedactions(errors: unknown): boolean {
+  if (!Array.isArray(errors) || errors.length === 0) {
+    return false;
+  }
+  return errors.every((error) => isRecord(error) && pathPointsAtGateField(error.path));
+}
+
+function pathPointsAtGateField(path: unknown): boolean {
+  if (!Array.isArray(path) || path.length === 0) {
+    return false;
+  }
+  const last = path[path.length - 1];
+  if (last === "email" || last === "shippingAddress" || last === "billingAddress") {
+    return true;
+  }
+  if (typeof last !== "string" || !ADDRESS_LEAVES.has(last)) {
+    return false;
+  }
+  for (const part of path.slice(0, -1)) {
+    if (part === "shippingAddress" || part === "billingAddress") {
+      return true;
+    }
+  }
+  return false;
 }
 
 function orderPayloadPopulated(data: Record<string, unknown>): boolean {

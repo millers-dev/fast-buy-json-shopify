@@ -10,9 +10,15 @@ import { Ajv } from "ajv";
 import addFormatsModule from "ajv-formats";
 
 import { SHOPIFY_API_VERSION } from "../src/api-version.js";
+import { orderAddressGateEnabled } from "../src/config.js";
 import type { ConnectorDeps } from "../src/deps.js";
 import { mapDisplayStatus } from "../src/order-map.js";
-import { ORDER_BY_ID_DOCUMENT, ORDERS_BY_QUERY_DOCUMENT } from "../src/order-query.js";
+import {
+  ORDER_BY_ID_ADDRESS_DOCUMENT,
+  ORDER_BY_ID_DOCUMENT,
+  ORDERS_BY_QUERY_ADDRESS_DOCUMENT,
+  ORDERS_BY_QUERY_DOCUMENT,
+} from "../src/order-query.js";
 import { SHOPIFY_BACKOFF_MS } from "../src/shopify-graphql.js";
 import { OauthStateStore } from "../src/oauth-state.js";
 import { createConnectorServer, listen } from "../src/server.js";
@@ -53,10 +59,21 @@ type OrderBody = {
     shipment?: { carrier?: string; trackingNumber?: string; trackingUrl?: string; estimatedDelivery?: string };
     created: string;
     updated?: string;
+    shippingAddress?: PostalAddress;
+    billingAddress?: PostalAddress;
   };
   message?: string;
   extensions?: unknown;
   userId?: string;
+};
+
+type PostalAddress = {
+  line1: string;
+  line2?: string;
+  city: string;
+  region?: string;
+  country: string;
+  postalCode: string;
 };
 
 type ProblemBody = { type: string; status: number; code: string; detail?: string };
@@ -65,6 +82,7 @@ describe("GET /api/fastbuyjson/orders/{orderId}", () => {
   let server: Server;
   let base: string;
   let tokens: TokenStore;
+  let orderDeps: ConnectorDeps;
   const calls: { url: string; body: string; headers: Record<string, string> }[] = [];
   let script: Array<() => Response> = [];
   const sleepDelays: number[] = [];
@@ -95,6 +113,7 @@ describe("GET /api/fastbuyjson/orders/{orderId}", () => {
       tokens,
       oauthState: new OauthStateStore(),
       now: () => FIXED_NOW,
+      orderAddressGate: false,
       sleep: async (ms) => {
         sleepDelays.push(ms);
       },
@@ -108,6 +127,7 @@ describe("GET /api/fastbuyjson/orders/{orderId}", () => {
         return next();
       },
     };
+    orderDeps = deps;
     server = createConnectorServer({ implementationVersion: metadata.version, shopDomain: SHOP }, deps);
     const port = await listen(server, 0, "127.0.0.1");
     base = `http://127.0.0.1:${port}`;
@@ -119,6 +139,7 @@ describe("GET /api/fastbuyjson/orders/{orderId}", () => {
     sleepDelays.length = 0;
     logs.length = 0;
     errors.length = 0;
+    orderDeps.orderAddressGate = false;
     tokens.save(sampleToken(), FIXED_NOW);
   });
 
@@ -713,6 +734,407 @@ describe("GET /api/fastbuyjson/orders/{orderId}", () => {
     assert.deepEqual(discover.authentication, { methods: ["anonymous"] });
     assert.equal(Object.hasOwn(discover, "auth"), false);
   });
+
+  it("keeps both addresses off unless SHOPIFY_ORDER_ADDRESS_GATE is 1 or true", async () => {
+    const off = [undefined, "", "   ", "0", "false", "FALSE", "off", "yes", "no", "2", "truee"];
+    for (const value of off) {
+      calls.length = 0;
+      logs.length = 0;
+      errors.length = 0;
+      orderDeps.orderAddressGate = orderAddressGateEnabled(value);
+      script.push(() => jsonResponse(200, asOrders([addressFixture()])));
+      const response = await getOrder(base, "1001", {}, "email=buyer@example.com");
+      const body = assertOrder(response);
+      assert.equal(Object.hasOwn(body.order, "shippingAddress"), false, JSON.stringify(value));
+      assert.equal(Object.hasOwn(body.order, "billingAddress"), false, JSON.stringify(value));
+      assert.equal(Object.hasOwn(body.order.payment ?? {}, "lastFourDigits"), false);
+      assert.equal(Object.hasOwn(body.order.payment ?? {}, "brand"), false);
+      const call = graphqlCall(calls, 0);
+      assert.equal(call.query, ORDERS_BY_QUERY_DOCUMENT, JSON.stringify(value));
+      assert.equal(/\bemail\b/.test(call.query), false);
+      assert.equal(/\bshippingAddress\b/.test(call.query), false);
+      assert.equal(/\bbillingAddress\b/.test(call.query), false);
+      assert.equal(String(call.variables.query).includes("email:"), false);
+      assertAddressFree(response.text);
+      assertGateLogs(logs, errors);
+    }
+  });
+
+  it("selects email and the six mailing-address fields on both queries when the gate is on", () => {
+    for (const query of [ORDER_BY_ID_ADDRESS_DOCUMENT, ORDERS_BY_QUERY_ADDRESS_DOCUMENT]) {
+      assertAddressSelection(query);
+      assertFulfillmentSelection(query);
+    }
+    for (const query of [ORDER_BY_ID_DOCUMENT, ORDERS_BY_QUERY_DOCUMENT]) {
+      assert.equal(/\bemail\b/.test(query), false);
+      assert.equal(/\bshippingAddress\b/.test(query), false);
+      assert.equal(/\bbillingAddress\b/.test(query), false);
+    }
+  });
+
+  it("opens the gate when the email matches after trim and case fold", async () => {
+    orderDeps.orderAddressGate = true;
+    script.push(() => jsonResponse(200, asOrders([addressFixture()])));
+    const spaced = await getOrder(base, "1001", {}, "email=%20Buyer@Example.com%20");
+    const body = assertOpenOrder(spaced);
+    assert.deepEqual(body.order.shippingAddress, {
+      line1: "123 Main St",
+      line2: "Apt 4B",
+      city: "Berlin",
+      region: "Berlin",
+      country: "DE",
+      postalCode: "10115",
+    });
+    assert.deepEqual(body.order.billingAddress, {
+      line1: "9 Billing Rd",
+      line2: "Suite 2",
+      city: "Munich",
+      region: "Bavaria",
+      country: "DE",
+      postalCode: "80331",
+    });
+    assert.equal(Object.hasOwn(body.order.payment ?? {}, "lastFourDigits"), false);
+    assert.equal(Object.hasOwn(body.order.payment ?? {}, "brand"), false);
+    assert.equal(Object.hasOwn(body, "userId"), false);
+    assert.equal(spaced.text.includes("@"), false);
+    const call = graphqlCall(calls, 0);
+    assert.equal(call.query, ORDERS_BY_QUERY_ADDRESS_DOCUMENT);
+    assert.equal(call.variables.query, 'name:"#1001"');
+    assert.equal(String(call.variables.query).includes("email:"), false);
+    assertAddressSelection(call.query);
+    assertGateLogs(logs, errors);
+
+    calls.length = 0;
+    logs.length = 0;
+    const trimmed = addressFixture();
+    const shipping = trimmed.shippingAddress as Record<string, unknown>;
+    shipping.address1 = "  123 Main St  ";
+    shipping.address2 = "  Apt 4B  ";
+    shipping.city = " Berlin ";
+    shipping.province = "  ";
+    shipping.countryCodeV2 = " DE ";
+    shipping.zip = " 10115 ";
+    script.push(() => jsonResponse(200, asOrders([trimmed])));
+    const trimmedBody = assertOpenOrder(await getOrder(base, "1001", {}, "email=buyer@example.com"));
+    assert.deepEqual(trimmedBody.order.shippingAddress, {
+      line1: "123 Main St",
+      line2: "Apt 4B",
+      city: "Berlin",
+      country: "DE",
+      postalCode: "10115",
+    });
+    assert.equal(Object.hasOwn(trimmedBody.order.shippingAddress ?? {}, "region"), false);
+  });
+
+  it("maps addresses on the order(id:) path when the email matches", async () => {
+    orderDeps.orderAddressGate = true;
+    script.push(() => jsonResponse(200, asOrder(addressFixture())));
+    const response = await getOrder(base, GID, {}, "email=buyer@example.com");
+    const body = assertOpenOrder(response);
+    assert.equal(body.order.shippingAddress?.line1, "123 Main St");
+    assert.equal(body.order.billingAddress?.line1, "9 Billing Rd");
+    assert.equal(graphqlCall(calls, 0).query, ORDER_BY_ID_ADDRESS_DOCUMENT);
+    assert.equal(logs.some((line) => line.includes("order status 200 gid lookup")), true);
+    assertGateLogs(logs, errors);
+  });
+
+  it("uses the address selection on the name query and the legacy id", async () => {
+    orderDeps.orderAddressGate = true;
+    const legacy = addressFixture();
+    legacy.name = "#EN1001";
+    script.push(() => jsonResponse(200, asOrders([])));
+    script.push(() => jsonResponse(200, asOrder(legacy)));
+    const body = assertOpenOrder(await getOrder(base, "1001", {}, "email=buyer@example.com"));
+    assert.equal(body.order.id, "EN1001");
+    assert.equal(graphqlCall(calls, 0).query, ORDERS_BY_QUERY_ADDRESS_DOCUMENT);
+    assert.equal(graphqlCall(calls, 1).query, ORDER_BY_ID_ADDRESS_DOCUMENT);
+    assert.equal(body.order.shippingAddress?.postalCode, "10115");
+    assertGateLogs(logs, errors);
+  });
+
+  it("stays address-free when the email is missing, repeated, malformed, or different", async () => {
+    orderDeps.orderAddressGate = true;
+    const queries = [
+      "",
+      "email=other@example.com",
+      "email=not-an-email",
+      "email=",
+      "email=buyer@example.com&email=buyer@example.com",
+      "Email=buyer@example.com",
+      "email=a@b",
+    ];
+    for (const query of queries) {
+      calls.length = 0;
+      logs.length = 0;
+      errors.length = 0;
+      const order = addressFixture();
+      if (query === "email=a@b") {
+        order.email = "a@b";
+      }
+      script.push(() => jsonResponse(200, asOrders([order])));
+      const response = await getOrder(base, "1001", {}, query);
+      const body = assertOrder(response);
+      assert.equal(response.status, 200, query);
+      assert.notEqual(response.status, 400, query);
+      assert.notEqual(response.status, 401, query);
+      assert.notEqual(response.status, 403, query);
+      assert.equal(Object.hasOwn(body.order, "shippingAddress"), false, query);
+      assert.equal(Object.hasOwn(body.order, "billingAddress"), false, query);
+      assert.equal(Object.hasOwn(body.order.payment ?? {}, "lastFourDigits"), false, query);
+      assert.equal(Object.hasOwn(body.order.payment ?? {}, "brand"), false, query);
+      assert.equal(graphqlCall(calls, 0).query, ORDERS_BY_QUERY_ADDRESS_DOCUMENT, query);
+      assertAddressFree(response.text);
+      assertGateLogs(logs, errors);
+    }
+  });
+
+  it("stays address-free when Order.email is null or blank", async () => {
+    orderDeps.orderAddressGate = true;
+    for (const fixture of ["order-address-email-null.json", "order-address-email-blank.json"]) {
+      calls.length = 0;
+      logs.length = 0;
+      errors.length = 0;
+      script.push(() => jsonResponse(200, asOrders([loadFixture(fixture)])));
+      const response = await getOrder(base, "1001", {}, "email=buyer@example.com");
+      const body = assertOrder(response);
+      assert.equal(Object.hasOwn(body.order, "shippingAddress"), false, fixture);
+      assert.equal(Object.hasOwn(body.order, "billingAddress"), false, fixture);
+      assertAddressFree(response.text);
+      assertGateLogs(logs, errors);
+    }
+
+    calls.length = 0;
+    logs.length = 0;
+    script.push(() => jsonResponse(200, asOrders([loadFixture("order-address-email-null.json")])));
+    const customer = await getOrder(base, "1001", {}, "email=customer@example.com");
+    const customerBody = assertOrder(customer);
+    assert.equal(Object.hasOwn(customerBody.order, "shippingAddress"), false);
+    assert.equal(Object.hasOwn(customerBody.order, "billingAddress"), false);
+    assertAddressFree(customer.text);
+  });
+
+  it("opens for a percent-encoded plus and stays closed when plus decodes as a space", async () => {
+    orderDeps.orderAddressGate = true;
+    const order = addressFixture();
+    order.email = "buyer+tag@example.com";
+    script.push(() => jsonResponse(200, asOrders([structuredClone(order)])));
+    const openedResponse = await getOrder(base, "1001", {}, "email=buyer%2Btag@example.com");
+    const opened = assertOpenOrder(openedResponse);
+    assert.equal(opened.order.shippingAddress?.line1, "123 Main St");
+    assert.equal(opened.order.billingAddress?.line1, "9 Billing Rd");
+    assert.equal(openedResponse.text.includes("buyer+tag@example.com"), false);
+    assert.equal(openedResponse.text.includes("@"), false);
+    assertGateLogs(logs, errors);
+
+    calls.length = 0;
+    logs.length = 0;
+    errors.length = 0;
+    script.push(() => jsonResponse(200, asOrders([order])));
+    const closedResponse = await getOrder(base, "1001", {}, "email=buyer+tag@example.com");
+    const closed = assertOrder(closedResponse);
+    assert.equal(Object.hasOwn(closed.order, "shippingAddress"), false);
+    assert.equal(Object.hasOwn(closed.order, "billingAddress"), false);
+    assertAddressFree(closedResponse.text);
+    assertGateLogs(logs, errors);
+  });
+
+  it("ignores an email sent only on a header", async () => {
+    orderDeps.orderAddressGate = true;
+    script.push(() => jsonResponse(200, asOrders([addressFixture()])));
+    const response = await getOrder(base, "1001", { Email: "buyer@example.com" });
+    const body = assertOrder(response);
+    assert.equal(Object.hasOwn(body.order, "shippingAddress"), false);
+    assert.equal(Object.hasOwn(body.order, "billingAddress"), false);
+    assertGateLogs(logs, errors);
+  });
+
+  it("ignores a Bearer token and still applies the query email", async () => {
+    orderDeps.orderAddressGate = true;
+    script.push(() => jsonResponse(200, asOrders([addressFixture()])));
+    script.push(() => jsonResponse(200, asOrders([addressFixture()])));
+    const anonymous = await getOrder(base, "1001");
+    const bearer = await getOrder(base, "1001", { Authorization: "Bearer demo.jwt.leftover" });
+    assert.equal(anonymous.status, 200);
+    assert.equal(bearer.status, 200);
+    assert.equal(bearer.text, anonymous.text);
+    assert.notEqual(bearer.status, 401);
+    assert.equal(Object.hasOwn((anonymous.json as OrderBody).order, "shippingAddress"), false);
+    assert.equal(Object.hasOwn(anonymous.json as OrderBody, "userId"), false);
+
+    calls.length = 0;
+    logs.length = 0;
+    script.push(() => jsonResponse(200, asOrders([addressFixture()])));
+    const matchedResponse = await getOrder(
+      base,
+      "1001",
+      { Authorization: "Bearer demo.jwt.leftover" },
+      "email=buyer@example.com",
+    );
+    const matched = assertOpenOrder(matchedResponse);
+    assert.equal(matched.order.shippingAddress?.line1, "123 Main St");
+    assert.equal(Object.hasOwn(matched, "userId"), false);
+    assert.equal(matchedResponse.text.includes("@"), false);
+    assertGateLogs(logs, errors);
+  });
+
+  it("returns ORDER_NOT_FOUND for an unknown id even when email is well formed", async () => {
+    orderDeps.orderAddressGate = true;
+    script.push(() => jsonResponse(200, { data: { order: null } }));
+    const response = await getOrder(base, GID, {}, "email=buyer@example.com");
+    assertNotFound(response);
+    assert.equal((response.json as ProblemBody).detail?.includes("email"), false);
+    assert.equal(response.text.includes("@"), false);
+    assert.equal(response.text.includes("123 Main St"), false);
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    assertGateLogs(logs, errors);
+  });
+
+  it("closes the gate when email is redacted and stays 200", async () => {
+    orderDeps.orderAddressGate = true;
+    script.push(() => jsonResponse(200, loadFixture("order-address-redact-email.json")));
+    const response = await getOrder(base, "1001", {}, "email=buyer@example.com");
+    const body = assertOrder(response);
+    assert.equal(Object.hasOwn(body.order, "shippingAddress"), false);
+    assert.equal(Object.hasOwn(body.order, "billingAddress"), false);
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    assertAddressFree(response.text);
+    assertGateLogs(logs, errors);
+  });
+
+  it("omits a redacted shipping address and still maps billing", async () => {
+    orderDeps.orderAddressGate = true;
+    script.push(() => jsonResponse(200, loadFixture("order-address-redact-shipping-zip.json")));
+    const zip = assertOpenOrder(await getOrder(base, "1001", {}, "email=buyer@example.com"));
+    assert.equal(Object.hasOwn(zip.order, "shippingAddress"), false);
+    assert.equal(zip.order.billingAddress?.line1, "9 Billing Rd");
+    assert.equal(zip.order.billingAddress?.postalCode, "80331");
+    assert.equal(zip.order.id, "1001");
+    assert.equal(JSON.stringify(zip).includes("123 Main St"), false);
+    assertGateLogs(logs, errors);
+
+    calls.length = 0;
+    logs.length = 0;
+    errors.length = 0;
+    script.push(() => jsonResponse(200, loadFixture("order-address-redact-shipping-address.json")));
+    const wholeResponse = await getOrder(base, "1001", {}, "email=buyer@example.com");
+    const whole = assertOpenOrder(wholeResponse);
+    assert.equal(wholeResponse.status, 200);
+    assert.equal(Object.hasOwn(whole.order, "shippingAddress"), false);
+    assert.equal(whole.order.billingAddress?.city, "Munich");
+    assert.equal(wholeResponse.text.includes("123 Main St"), false);
+    assertGateLogs(logs, errors);
+  });
+
+  it("returns 500 when an error is not limited to a gate field", async () => {
+    orderDeps.orderAddressGate = true;
+    for (const fixture of ["order-address-error-no-path.json", "order-address-error-order-path.json", "order-address-error-mixed.json"]) {
+      calls.length = 0;
+      logs.length = 0;
+      errors.length = 0;
+      script.push(() => jsonResponse(200, loadFixture(fixture)));
+      const response = await getOrder(base, "1001", {}, "email=buyer@example.com");
+      assertProblem(response, 500, "INTERNAL_ERROR");
+      assert.equal(response.text.includes('"order"'), false, fixture);
+      assert.equal((response.json as ProblemBody).detail, "The order request could not be completed.");
+      assert.equal(response.headers.get("cache-control"), "no-store");
+      assertAddressFree(response.text);
+      assertGateLogs(logs, errors);
+    }
+  });
+
+  it("still asks for a reinstall when read_orders is missing and the gate is on", async () => {
+    orderDeps.orderAddressGate = true;
+    script.push(() => jsonResponse(200, loadFixture("order-access-denied.json")));
+    const response = await getOrder(base, "1001", {}, "email=buyer@example.com");
+    assertProblem(response, 500, "INTERNAL_ERROR");
+    assert.equal((response.json as ProblemBody).detail, REINSTALL_DETAIL);
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    assert.equal(response.text.includes('"order"'), false);
+    assertGateLogs(logs, errors);
+  });
+
+  it("omits an address whose country is ZZ or whose required fields are missing", async () => {
+    orderDeps.orderAddressGate = true;
+    const rows: { fixture: string; shipping: boolean; absent: string[] }[] = [
+      { fixture: "order-address-zz.json", shipping: false, absent: ["1 Unknown Way", "ZZ"] },
+      { fixture: "order-address-zip-null.json", shipping: false, absent: ["123 Main St"] },
+      { fixture: "order-address-country-null.json", shipping: false, absent: ["123 Main St"] },
+      { fixture: "order-address-shipping-null.json", shipping: false, absent: ["123 Main St", "Apt 4B"] },
+      { fixture: "order-address-missing-city.json", shipping: false, absent: ["123 Main St"] },
+    ];
+    for (const row of rows) {
+      calls.length = 0;
+      logs.length = 0;
+      errors.length = 0;
+      script.push(() => jsonResponse(200, asOrders([loadFixture(row.fixture)])));
+      const body = assertOpenOrder(await getOrder(base, "1001", {}, "email=buyer@example.com"));
+      assert.equal(Object.hasOwn(body.order, "shippingAddress"), row.shipping, row.fixture);
+      assert.equal(body.order.billingAddress?.line1, "9 Billing Rd", row.fixture);
+      assert.equal(body.order.billingAddress?.city, "Munich", row.fixture);
+      const text = JSON.stringify(body);
+      for (const absent of row.absent) {
+        assert.equal(text.includes(absent), false, `${row.fixture} ${absent}`);
+      }
+      assertGateLogs(logs, errors);
+    }
+
+    calls.length = 0;
+    const spacedZz = addressFixture();
+    (spacedZz.shippingAddress as Record<string, unknown>).countryCodeV2 = " ZZ ";
+    script.push(() => jsonResponse(200, asOrders([spacedZz])));
+    const zzBody = assertOpenOrder(await getOrder(base, "1001", {}, "email=buyer@example.com"));
+    assert.equal(Object.hasOwn(zzBody.order, "shippingAddress"), false);
+    assert.equal(zzBody.order.billingAddress?.line1, "9 Billing Rd");
+  });
+
+  it("omits line2 and region when address2 and province are null", async () => {
+    orderDeps.orderAddressGate = true;
+    script.push(() => jsonResponse(200, asOrders([loadFixture("order-address-optional-blank.json")])));
+    const body = assertOpenOrder(await getOrder(base, "1001", {}, "email=buyer@example.com"));
+    assert.deepEqual(body.order.shippingAddress, {
+      line1: "123 Main St",
+      city: "Berlin",
+      country: "DE",
+      postalCode: "10115",
+    });
+    assert.deepEqual(body.order.billingAddress, {
+      line1: "9 Billing Rd",
+      city: "Munich",
+      country: "DE",
+      postalCode: "80331",
+    });
+    assert.equal(Object.hasOwn(body.order.shippingAddress ?? {}, "line2"), false);
+    assert.equal(Object.hasOwn(body.order.shippingAddress ?? {}, "region"), false);
+    assert.equal(Object.hasOwn(body.order.billingAddress ?? {}, "line2"), false);
+    assert.equal(Object.hasOwn(body.order.billingAddress ?? {}, "region"), false);
+    assertGateLogs(logs, errors);
+  });
+
+  it("does not return email, phone, name, or card fragments when the gate is open", async () => {
+    orderDeps.orderAddressGate = true;
+    script.push(() => jsonResponse(200, asOrders([addressFixture()])));
+    const response = await getOrder(base, "1001", {}, "email=buyer@example.com");
+    const body = assertOpenOrder(response);
+    assert.equal(body.order.payment?.method, "shopify_payments");
+    assert.equal(Object.hasOwn(body.order.payment ?? {}, "lastFourDigits"), false);
+    assert.equal(Object.hasOwn(body.order.payment ?? {}, "brand"), false);
+    assert.equal(Object.hasOwn(body, "userId"), false);
+    assert.equal(Object.hasOwn(body, "extensions"), false);
+    assert.equal(response.text.includes("@"), false);
+    assertNoBuyerSecrets(response.text);
+    assertGateLogs(logs, errors);
+  });
+
+  it("treats one email parameter as case-sensitive and still opens beside a different name", async () => {
+    orderDeps.orderAddressGate = true;
+    script.push(() => jsonResponse(200, asOrders([addressFixture()])));
+    const body = assertOpenOrder(
+      await getOrder(base, "1001", {}, "email=buyer@example.com&Email=other@example.com"),
+    );
+    assert.equal(body.order.shippingAddress?.line1, "123 Main St");
+    assert.equal(JSON.stringify(body).includes("other@example.com"), false);
+    assertGateLogs(logs, errors);
+  });
 });
 
 describe("deliveredAt signal", () => {
@@ -842,9 +1264,15 @@ function expectAdmin(call: GraphqlCall): void {
   assert.equal(call.query.includes("legacyResourceId"), true);
 }
 
-async function getOrder(base: string, id: string, headers: Record<string, string> = {}): Promise<HttpResult> {
+async function getOrder(
+  base: string,
+  id: string,
+  headers: Record<string, string> = {},
+  query = "",
+): Promise<HttpResult> {
   const path = id === "" ? "/api/fastbuyjson/orders/" : `/api/fastbuyjson/orders/${encodeURIComponent(id)}`;
-  return requestOrder(base, path, headers);
+  const suffix = query === "" ? "" : query.startsWith("?") ? query : `?${query}`;
+  return requestOrder(base, `${path}${suffix}`, headers);
 }
 
 async function requestOrder(base: string, path: string, headers: Record<string, string> = {}): Promise<HttpResult> {
@@ -868,6 +1296,19 @@ function assertOrder(response: HttpResult): OrderBody {
   return response.json as OrderBody;
 }
 
+function assertOpenOrder(response: HttpResult): OrderBody {
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.match(response.headers.get("content-type") ?? "", /^application\/json/);
+  assert.equal(validateSchema("order-status.json", response.json), true);
+  assertNoBuyerSecrets(response.text);
+  return response.json as OrderBody;
+}
+
+function addressFixture(): Record<string, unknown> {
+  return structuredClone(loadFixture("order-address-gate.json")) as Record<string, unknown>;
+}
+
 function assertNotFound(response: HttpResult): void {
   assertProblem(response, 404, "ORDER_NOT_FOUND");
   const body = response.json as ProblemBody;
@@ -884,6 +1325,87 @@ function assertProblem(response: HttpResult, status: number, code: string): void
   assert.equal(body.status, status);
   assert.equal(body.code, code);
   assertSafe(response.text);
+}
+
+function assertAddressFree(text: string): void {
+  assertSafe(text);
+  for (const secret of [
+    "Apt 4B",
+    "Suite 2",
+    "Munich",
+    "Bavaria",
+    "80331",
+    "1 Unknown Way",
+    "999 Display Only",
+    "BE-CODE",
+    "BY-CODE",
+    "customer@example.com",
+    "buyer+tag@example.com",
+    "+15555550100",
+    "Analytical Engines",
+    "Germany",
+  ]) {
+    assert.equal(text.includes(secret), false, secret);
+  }
+}
+
+function assertNoBuyerSecrets(text: string): void {
+  assert.equal(text.toLowerCase().includes("gid://"), false);
+  assert.equal(text.includes(ADMIN_TOKEN), false);
+  assert.equal(text.includes(REFRESH_TOKEN), false);
+  assert.equal(text.includes("buyer@example.com"), false);
+  assert.equal(text.includes("customer@example.com"), false);
+  assert.equal(text.includes("buyer+tag@example.com"), false);
+  assert.equal(text.includes("4242"), false);
+  assert.equal(text.includes("Ada Lovelace"), false);
+  assert.equal(text.includes("Visa"), false);
+  assert.equal(text.includes("lastFourDigits"), false);
+  assert.equal(text.includes("CardPaymentDetails"), false);
+  assert.equal(text.includes("+15555550100"), false);
+  assert.equal(text.includes("999 Display Only"), false);
+  assert.equal(text.includes("BE-CODE"), false);
+  assert.equal(text.includes("BY-CODE"), false);
+  assert.equal(text.includes("Analytical Engines"), false);
+  assert.equal(text.includes("Germany"), false);
+  assert.equal(text.includes("userId"), false);
+}
+
+function assertGateLogs(seenLogs: string[], seenErrors: string[]): void {
+  const text = `${seenLogs.join("\n")}\n${seenErrors.join("\n")}`;
+  assertAddressFree(text);
+  assert.equal(text.includes("email="), false);
+  assert.equal(text.includes("@"), false);
+}
+
+function assertAddressSelection(query: string): void {
+  assert.match(query, /\bemail\b/);
+  const blocks = [...query.matchAll(/(?:shipping|billing)Address\s*\{([^}]*)\}/g)].map((match) => match[1] ?? "");
+  assert.equal(blocks.length, 2);
+  for (const block of blocks) {
+    for (const field of ["address1", "address2", "city", "province", "countryCodeV2", "zip"]) {
+      assert.match(block, new RegExp(`\\b${field}\\b`));
+    }
+    assert.equal(/\bphone\b/.test(block), false);
+    assert.equal(/\bname\b/.test(block), false);
+    assert.equal(/\bfirstName\b/.test(block), false);
+    assert.equal(/\blastName\b/.test(block), false);
+    assert.equal(/\bcompany\b/.test(block), false);
+    assert.equal(/\blatitude\b/.test(block), false);
+    assert.equal(/\blongitude\b/.test(block), false);
+    assert.equal(/\bcountryCode\b/.test(block), false);
+    assert.equal(/\bprovinceCode\b/.test(block), false);
+    assert.equal(/\bcountry\b/.test(block), false);
+  }
+  assert.equal(/\bphone\b/.test(query), false);
+  assert.equal(/\bcustomer\b/.test(query), false);
+  assert.equal(/\bdisplayAddress\b/.test(query), false);
+  assert.equal(/\bfirstName\b/.test(query), false);
+  assert.equal(/\blastName\b/.test(query), false);
+  assert.equal(/\blatitude\b/.test(query), false);
+  assert.equal(/\blongitude\b/.test(query), false);
+  assert.equal(/\bprovinceCode\b/.test(query), false);
+  assert.equal(/\bCardPaymentDetails\b/.test(query), false);
+  assert.equal(/\bcountryCode\b/.test(query), false);
 }
 
 function assertSafe(text: string): void {

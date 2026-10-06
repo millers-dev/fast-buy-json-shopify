@@ -8,7 +8,7 @@ import { Ajv } from "ajv";
 import addFormatsModule from "ajv-formats";
 
 import { SHOPIFY_API_VERSION } from "../src/api-version.js";
-import { loadConfig, readPort } from "../src/config.js";
+import { loadConfig, orderAddressGateEnabled, readPort } from "../src/config.js";
 import { buildDetectResponse, type DetectResponse } from "../src/detect.js";
 import {
   BASE_PATH,
@@ -94,6 +94,16 @@ describe("config", () => {
     assert.throws(() => loadConfig({ SHOPIFY_SHOP: "https://example.myshopify.com" }, "0.1.0"));
     assert.throws(() => loadConfig({ SHOPIFY_SHOP: "not a domain" }, "0.1.0"));
     assert.throws(() => buildDetectResponse({ implementationVersion: "0.1.0", shopDomain: "bad host" }));
+  });
+
+  it("turns the order address gate on only for 1 or true", () => {
+    assert.equal(orderAddressGateEnabled(undefined), false);
+    for (const value of ["", "   ", "0", "false", "FALSE", "off", "yes", "no", "2", "truee", " truee "]) {
+      assert.equal(orderAddressGateEnabled(value), false, JSON.stringify(value));
+    }
+    for (const value of ["1", " 1 ", "true", "TRUE", " True "]) {
+      assert.equal(orderAddressGateEnabled(value), true, JSON.stringify(value));
+    }
   });
 
   it("defaults the listen port to 3100", () => {

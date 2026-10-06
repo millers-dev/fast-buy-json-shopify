@@ -91,6 +91,19 @@ export function loadShopifyAuth(env: NodeJS.ProcessEnv): ShopifyAuthConfig | und
   };
 }
 
+/**
+ * Street addresses are copied onto the order response only when this is on.
+ * On is the trimmed value `1` or `true`, compared case-insensitively.
+ * Unset, empty, `0`, `false`, `off`, and every other value are off.
+ */
+export function orderAddressGateEnabled(raw: string | undefined): boolean {
+  if (raw === undefined) {
+    return false;
+  }
+  const value = raw.trim().toLowerCase();
+  return value === "1" || value === "true";
+}
+
 export function readPort(env: NodeJS.ProcessEnv, defaultPort: number): number {
   const raw = env.PORT;
   if (raw === undefined || raw.trim() === "") {

@@ -12,8 +12,11 @@
  * `originAddress`, or `location`.
  * Line prices are `discountedUnitPriceSet` / `originalUnitPriceSet` and
  * `discountedTotalSet` / `originalTotalSet`.
- * The selection set does not read addresses, email, phone, customer name, or
- * `CardPaymentDetails`, and it does not read the Order GID.
+ * The selection set does not read phone, customer name, `CardPaymentDetails`,
+ * or the Order GID. `email`, `shippingAddress`, and `billingAddress` are added
+ * only when `SHOPIFY_ORDER_ADDRESS_GATE` is on. That address selection is
+ * `address1`, `address2`, `city`, `province`, `countryCodeV2`, and `zip`.
+ * It does not read `displayAddress`, `country`, `countryCode`, or `provinceCode`.
  */
 
 export const ORDER_LINE_PAGE = 50;
@@ -64,19 +67,54 @@ const ORDER_FIELDS = `
       }
     }`;
 
-export const ORDER_BY_ID_DOCUMENT = `
+const ADDRESS_FIELDS = `
+    email
+    shippingAddress {
+      address1
+      address2
+      city
+      province
+      countryCodeV2
+      zip
+    }
+    billingAddress {
+      address1
+      address2
+      city
+      province
+      countryCodeV2
+      zip
+    }`;
+
+function orderFields(addressGate: boolean): string {
+  return addressGate ? `${ORDER_FIELDS}${ADDRESS_FIELDS}` : ORDER_FIELDS;
+}
+
+export const ORDER_BY_ID_DOCUMENT = orderByIdDocument(false);
+
+export const ORDERS_BY_QUERY_DOCUMENT = ordersByQueryDocument(false);
+
+export const ORDER_BY_ID_ADDRESS_DOCUMENT = orderByIdDocument(true);
+
+export const ORDERS_BY_QUERY_ADDRESS_DOCUMENT = ordersByQueryDocument(true);
+
+export function orderByIdDocument(addressGate: boolean): string {
+  return `
 query OrderById($id: ID!, $after: String) {
-  order(id: $id) {${ORDER_FIELDS}
+  order(id: $id) {${orderFields(addressGate)}
   }
 }`;
+}
 
-export const ORDERS_BY_QUERY_DOCUMENT = `
+export function ordersByQueryDocument(addressGate: boolean): string {
+  return `
 query OrdersByQuery($query: String!, $after: String) {
   orders(first: 2, query: $query) {
-    nodes {${ORDER_FIELDS}
+    nodes {${orderFields(addressGate)}
     }
   }
 }`;
+}
 
 const SEARCH_VALUE = /^[A-Za-z0-9_-]+$/;
 
