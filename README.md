@@ -4,7 +4,7 @@ This repository is the Shopify store connector for [FastBuyJSON](https://github.
 
 FastBuyJSON itself — the contract, the Node and Python reference servers, the TypeScript SDK, and the stdio MCP server — stays in `millers-dev/fast-buy-json`. Point that MCP server at this process with `FASTBUYJSON_API_URL=http://localhost:3100/api/fastbuyjson`. This package is not part of that repository and it is not published to npm.
 
-It is early. The accepted plans are `docs/SHOPIFY_PLAN.md`, `docs/SHOPIFY_ORDERS_PLAN.md`, and `docs/SHOPIFY_DELIVERED_PLAN.md` in `millers-dev/fast-buy-json`. This tree implements discovery, one-shop OAuth, catalog search, an anonymous cart, one discount code, hosted checkout handoff, shipping-option discovery, and order status.
+It is early. The accepted plans are `docs/SHOPIFY_PLAN.md`, `docs/SHOPIFY_ORDERS_PLAN.md`, `docs/SHOPIFY_DELIVERED_PLAN.md`, and `docs/SHOPIFY_EMAIL_ORDER_PLAN.md` in `millers-dev/fast-buy-json`. This tree implements discovery, one-shop OAuth, catalog search, an anonymous cart, one discount code, hosted checkout handoff, shipping-option discovery, and order status.
 
 ## What v1 does
 
@@ -24,7 +24,7 @@ v1 is one Shopify shop speaking FastBuyJSON discovery, catalog search, cart, and
 - Charge a card, wallet, PayPal, or Shop Pay
 - Create a Shopify order, including from `POST /checkout/confirm`
 - Call Checkout MCP `complete_checkout`
-- Read customer records, or return an order address or card fragment
+- Read customer records, or return a card fragment. Order street addresses are returned only when `SHOPIFY_ORDER_ADDRESS_GATE` is on and `?email=` matches the order email
 - Run the reference seed catalog (`standard` / `express` shipping, free shipping over USD 100, seed tax rates, or promo codes `SAVE10` / `WELCOME5`)
 
 Checkout stays on Shopify. This package does not charge cards or create orders.
@@ -134,7 +134,11 @@ Status uses the first match: `cancelledAt` is `cancelled`, `REFUNDED` is `refund
 
 Money uses `shopMoney` decimal strings, parsed the same way as the cart. Current totals are preferred, then the original totals. Tax, shipping, and discount are omitted when that bag is null. A missing `shopMoney` on a required amount is **500** `INTERNAL_ERROR`. The connector does not invent `0`.
 
-Line `productId` is the first non-empty of the variant SKU, the line SKU, and the variant legacy id. A line with none of those is left out. `items` may be empty. Addresses and card fragments are not selected and not returned: no `shippingAddress`, `billingAddress`, `lastFourDigits`, or `brand`. The fulfillment selection adds `deliveredAt` and does not pass `first` on `fulfillments`. It does not select `events`, `displayStatus`, `estimatedDeliveryAt`, `inTransitAt`, `originAddress`, or `location`. `payment` is omitted when `paymentGatewayNames` is empty or `displayFinancialStatus` is null. Otherwise `method` is the first gateway name. Shipment walks `fulfillments` in order, skips `CANCELLED`, `ERROR`, and `FAILURE`, and uses the first remaining tracking number. `deliveredAt` does not choose that fulfillment. `estimatedDelivery` is never set.
+Line `productId` is the first non-empty of the variant SKU, the line SKU, and the variant legacy id. A line with none of those is left out. `items` may be empty. Card fragments are not selected and not returned: no `lastFourDigits` or `brand`. The fulfillment selection adds `deliveredAt` and does not pass `first` on `fulfillments`. It does not select `events`, `displayStatus`, `estimatedDeliveryAt`, `inTransitAt`, `originAddress`, or `location`. `payment` is omitted when `paymentGatewayNames` is empty or `displayFinancialStatus` is null. Otherwise `method` is the first gateway name. Shipment walks `fulfillments` in order, skips `CANCELLED`, `ERROR`, and `FAILURE`, and uses the first remaining tracking number. `deliveredAt` does not choose that fulfillment. `estimatedDelivery` is never set.
+
+`SHOPIFY_ORDER_ADDRESS_GATE` defaults to off. Off ignores `?email=` and keeps today's address-free body. The selection does not add `email`, `shippingAddress`, or `billingAddress`. On is only the trimmed value `1` or `true`, compared without case. On adds those fields to the first read of both order queries. Later line-item pages keep the address-free selection. The gate opens only when the query string has exactly one parameter named `email`, the trimmed value passes the ajv-formats full email check, and it matches trimmed `Order.email` under `toLowerCase()`. A missing, repeated, malformed, or different email is still **200** without either address, and it is not **401** or **403**. An unknown order stays **404** `ORDER_NOT_FOUND`. A `+` in the query is a space, so a plus-address is sent as `%2B`.
+
+When the gate is open, `address1`, `address2`, `city`, `province`, `countryCodeV2`, and `zip` map to `line1`, `line2`, `city`, `region`, `country`, and `postalCode`. Shipping and billing are independent. A missing `line1`, `city`, `country`, or `postalCode` omits that whole object. `countryCodeV2` `ZZ` counts as a missing country. `line2` and `region` are omitted when blank. The body still omits email, phone, name, and `userId`. With the flag on, a GraphQL error whose path is `email` or a mailing-address field is field redaction and stays **200**. A redacted email closes the gate. A path that ends at `shippingAddress` or `billingAddress` omits that object. Any other error path, or an error with no path, is **500** `INTERNAL_ERROR`. Logs still omit the query string, the email, and both addresses.
 
 Shopify **429** or `THROTTLED` waits one second, retries that call once, and then returns **429** `RATE_LIMITED`. Logs may include the HTTP status and the client token when that token is not a GID. A GID lookup is logged as a gid lookup without the GID. Logs omit tokens, addresses, email, phone, names, card data, and every `gid://` string.
 
@@ -149,7 +153,7 @@ curl -s http://localhost:3100/api/fastbuyjson/detect
 
 `PORT` defaults to `3100`. Copy `.env.example` for local values. With only `PORT` and `SHOPIFY_SHOP`, the process serves discovery and does not call Shopify.
 
-To store a token, set `SHOPIFY_SHOP`, `SHOPIFY_CLIENT_ID`, `SHOPIFY_CLIENT_SECRET`, and `TOKEN_ENCRYPTION_KEY` (32 bytes, base64). Leave `APP_URL` unset for client credentials. Set `APP_URL` to the public HTTPS origin, then open `http://localhost:3100/api/shopify/auth`, for the authorization-code grant. `SHOPIFY_API_VERSION` must be `2026-10` when it is set.
+To store a token, set `SHOPIFY_SHOP`, `SHOPIFY_CLIENT_ID`, `SHOPIFY_CLIENT_SECRET`, and `TOKEN_ENCRYPTION_KEY` (32 bytes, base64). Leave `APP_URL` unset for client credentials. Set `APP_URL` to the public HTTPS origin, then open `http://localhost:3100/api/shopify/auth`, for the authorization-code grant. `SHOPIFY_API_VERSION` must be `2026-10` when it is set. Leave `SHOPIFY_ORDER_ADDRESS_GATE` unset to keep order addresses off. Set it to `1` or `true` to return `shippingAddress` and `billingAddress` when `?email=` matches the order.
 
 ```bash
 npm test

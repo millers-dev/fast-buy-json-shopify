@@ -1,6 +1,7 @@
 import { pathToFileURL } from "node:url";
 
-import { loadConfig, loadShopifyAuth, readPort } from "./config.js";
+import { loadConfig, loadShopifyAuth, orderAddressGateEnabled, readPort } from "./config.js";
+import type { ConnectorDeps } from "./deps.js";
 import { DEFAULT_PORT, createConnectorServer, listen } from "./server.js";
 import { openConnector } from "./startup.js";
 import { readPackageMetadata } from "./version.js";
@@ -10,18 +11,27 @@ export function start(env: NodeJS.ProcessEnv = process.env): void {
   const config = loadConfig(env, metadata.version);
   const port = readPort(env, DEFAULT_PORT);
   const auth = loadShopifyAuth(env);
-  void boot(config, port, auth).catch((error: unknown) => {
+  void boot(config, port, auth, env).catch((error: unknown) => {
     console.error(error instanceof Error ? error.message : "failed to start");
     process.exit(1);
   });
+}
+
+/** Copies `SHOPIFY_ORDER_ADDRESS_GATE` onto deps. `boot` calls this after the token store opens. */
+export function applyOrderAddressGate(deps: ConnectorDeps, env: NodeJS.ProcessEnv): void {
+  deps.orderAddressGate = orderAddressGateEnabled(env.SHOPIFY_ORDER_ADDRESS_GATE);
 }
 
 async function boot(
   config: ReturnType<typeof loadConfig>,
   port: number,
   auth: ReturnType<typeof loadShopifyAuth>,
+  env: NodeJS.ProcessEnv,
 ): Promise<void> {
   const deps = auth === undefined ? undefined : await openConnector(auth);
+  if (deps !== undefined) {
+    applyOrderAddressGate(deps, env);
+  }
   const server = createConnectorServer(config, deps);
   const bound = await listen(server, port);
   const shop = config.shopDomain ?? "unset";

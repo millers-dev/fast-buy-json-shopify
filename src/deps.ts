@@ -16,4 +16,6 @@ export type ConnectorDeps = {
   fetch: typeof fetch;
   now: () => number;
   sleep?: (ms: number) => Promise<void>;
+  /** From `SHOPIFY_ORDER_ADDRESS_GATE` at startup. Absent or false keeps addresses off. */
+  orderAddressGate?: boolean;
 };

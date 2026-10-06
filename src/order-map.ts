@@ -51,6 +51,15 @@ type Payment = { method: string; status: PaymentStatus };
 
 type Shipment = { trackingNumber: string; carrier?: string; trackingUrl?: string };
 
+export type PostalAddress = {
+  line1: string;
+  line2?: string;
+  city: string;
+  region?: string;
+  country: string;
+  postalCode: string;
+};
+
 export type OrderStatusBody = {
   order: {
     id: string;
@@ -61,6 +70,8 @@ export type OrderStatusBody = {
     updated?: string;
     payment?: Payment;
     shipment?: Shipment;
+    shippingAddress?: PostalAddress;
+    billingAddress?: PostalAddress;
   };
 };
 
@@ -143,6 +154,50 @@ export function mapOrder(
     body.order.shipment = shipment;
   }
   return { kind: "ok", body };
+}
+
+/** Map one Shopify `MailingAddress`. A missing required field omits the whole object. */
+export function mapMailingAddress(value: unknown): PostalAddress | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const line1 = requiredAddressText(value.address1);
+  const city = requiredAddressText(value.city);
+  const country = requiredCountry(value.countryCodeV2);
+  const postalCode = requiredAddressText(value.zip);
+  if (line1 === undefined || city === undefined || country === undefined || postalCode === undefined) {
+    return undefined;
+  }
+  const address: PostalAddress = { line1, city, country, postalCode };
+  const line2 = optionalAddressText(value.address2);
+  if (line2 !== undefined) {
+    address.line2 = line2;
+  }
+  const region = optionalAddressText(value.province);
+  if (region !== undefined) {
+    address.region = region;
+  }
+  return address;
+}
+
+function requiredAddressText(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed === "" ? undefined : trimmed;
+}
+
+function optionalAddressText(value: unknown): string | undefined {
+  return requiredAddressText(value);
+}
+
+function requiredCountry(value: unknown): string | undefined {
+  const code = requiredAddressText(value);
+  if (code === undefined || code === "ZZ") {
+    return undefined;
+  }
+  return code;
 }
 
 export function mapDisplayStatus(

@@ -8,7 +8,9 @@ import { Ajv } from "ajv";
 import addFormatsModule from "ajv-formats";
 
 import { SHOPIFY_API_VERSION } from "../src/api-version.js";
-import { loadConfig, readPort } from "../src/config.js";
+import { loadConfig, orderAddressGateEnabled, readPort } from "../src/config.js";
+import type { ConnectorDeps } from "../src/deps.js";
+import { applyOrderAddressGate } from "../src/index.js";
 import { buildDetectResponse, type DetectResponse } from "../src/detect.js";
 import {
   BASE_PATH,
@@ -94,6 +96,30 @@ describe("config", () => {
     assert.throws(() => loadConfig({ SHOPIFY_SHOP: "https://example.myshopify.com" }, "0.1.0"));
     assert.throws(() => loadConfig({ SHOPIFY_SHOP: "not a domain" }, "0.1.0"));
     assert.throws(() => buildDetectResponse({ implementationVersion: "0.1.0", shopDomain: "bad host" }));
+  });
+
+  it("turns the order address gate on only for 1 or true", () => {
+    assert.equal(orderAddressGateEnabled(undefined), false);
+    for (const value of ["", "   ", "0", "false", "FALSE", "off", "yes", "no", "2", "truee", " truee "]) {
+      assert.equal(orderAddressGateEnabled(value), false, JSON.stringify(value));
+    }
+    for (const value of ["1", " 1 ", "true", "TRUE", " True "]) {
+      assert.equal(orderAddressGateEnabled(value), true, JSON.stringify(value));
+    }
+  });
+
+  it("boot copies SHOPIFY_ORDER_ADDRESS_GATE onto deps", () => {
+    const deps = { orderAddressGate: true } as ConnectorDeps;
+    applyOrderAddressGate(deps, {});
+    assert.equal(deps.orderAddressGate, false);
+    applyOrderAddressGate(deps, { SHOPIFY_ORDER_ADDRESS_GATE: "" });
+    assert.equal(deps.orderAddressGate, false);
+    applyOrderAddressGate(deps, { SHOPIFY_ORDER_ADDRESS_GATE: "off" });
+    assert.equal(deps.orderAddressGate, false);
+    applyOrderAddressGate(deps, { SHOPIFY_ORDER_ADDRESS_GATE: " true " });
+    assert.equal(deps.orderAddressGate, true);
+    applyOrderAddressGate(deps, { SHOPIFY_ORDER_ADDRESS_GATE: "1" });
+    assert.equal(deps.orderAddressGate, true);
   });
 
   it("defaults the listen port to 3100", () => {
