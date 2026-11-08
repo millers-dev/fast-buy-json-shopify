@@ -1,0 +1,124 @@
+name: Dependabot auto-merge
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  automerge:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.actor.login == 'dependabot[bot]' &&
+      github.event.workflow_run.triggering_actor.login == 'dependabot[bot]' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Merge non-major Dependabot PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          set -euo pipefail
+          pr=$(gh pr list --head "$HEAD_BRANCH" --state open \
+            --json number,author,headRefOid \
+            --jq '.[] | select(.author.login == "app/dependabot" and .headRefOid == env.HEAD_SHA) | .number')
+          if [ -z "$pr" ]; then
+            echo "No open Dependabot PR at $HEAD_SHA on $HEAD_BRANCH, skipping."
+            exit 0
+          fi
+          msg=$(gh api "repos/$GH_REPO/commits/$HEAD_SHA" --jq '.commit.message')
+          verdict=$(COMMIT_MSG="$msg" python3 -I - <<'PY'
+          import os
+          import re
+
+          msg = os.environ["COMMIT_MSG"]
+          ALLOWED_KEYS = {
+              "dependency-name",
+              "dependency-version",
+              "dependency-type",
+              "update-type",
+              "dependency-group",
+          }
+          VERSION = re.compile(r"^v?(\d+)\.(\d+)(?:\.(\d+))?(?:[-+][0-9A-Za-z.-]+)?$")
+
+
+          def skip(reason):
+              print("SKIP: " + reason)
+              raise SystemExit(0)
+
+
+          def clean(value):
+              return value.strip().strip("'\"`")
+
+
+          def parse(value):
+              m = VERSION.match(clean(value))
+              if not m:
+                  return None
+              return int(m.group(1)), int(m.group(2))
+
+
+          body, sep, rest = msg.rpartition("\n---\nupdated-dependencies:\n")
+          if not sep:
+              skip("no updated-dependencies block")
+          block_text, end, _ = rest.partition("\n...\n")
+          if not end:
+              skip("updated-dependencies block is not terminated")
+
+          deps = []
+          for line in block_text.splitlines():
+              m = re.match(r"^- dependency-name: (.+)$", line)
+              if m:
+                  deps.append({"dependency-name": clean(m.group(1))})
+                  continue
+              m = re.match(r"^  ([a-z-]+): (.+)$", line)
+              if not m or not deps or m.group(1) not in ALLOWED_KEYS or m.group(1) in deps[-1]:
+                  skip("unexpected line in updated-dependencies block: " + line)
+              deps[-1][m.group(1)] = clean(m.group(2))
+          if not deps:
+              skip("no dependencies parsed")
+
+          names = [d["dependency-name"] for d in deps]
+          if len(set(names)) != len(names):
+              skip("dependency listed more than once, needs manual review")
+
+          for d in deps:
+              name = d["dependency-name"]
+              update_type = d.get("update-type")
+              if update_type == "version-update:semver-major":
+                  skip(name + " is semver-major")
+              if update_type not in (None, "version-update:semver-minor", "version-update:semver-patch"):
+                  skip(name + " has unknown update-type " + update_type)
+              q = re.escape(name)
+              froms = re.findall(
+                  r"^(?:Bumps \[" + q + r"\]\([^)]*\)|Updates `" + q + r"`) from (\S+) to ",
+                  body,
+                  re.M,
+              )
+              if len(froms) != 1:
+                  skip(name + ": expected exactly one from-version in the body, found " + str(len(froms)))
+              old, new = parse(froms[0]), parse(d.get("dependency-version", ""))
+              if old is None or new is None:
+                  skip(name + ": cannot parse versions " + froms[0] + " -> " + d.get("dependency-version", ""))
+              if old[0] != new[0]:
+                  skip(name + ": major change " + froms[0] + " -> " + d["dependency-version"])
+              if old[0] == 0 and old[1] != new[1]:
+                  skip(name + ": 0.x minor change " + froms[0] + " -> " + d["dependency-version"])
+
+          print("MERGE: " + str(len(deps)) + " dependencies, all proven non-breaking")
+          PY
+          )
+          echo "$verdict"
+          if [ "${verdict%%:*}" != "MERGE" ]; then
+            echo "PR #$pr is not proven non-major, leaving it for manual review."
+            exit 0
+          fi
+          gh pr merge "$pr" --squash --delete-branch --match-head-commit "$HEAD_SHA"
